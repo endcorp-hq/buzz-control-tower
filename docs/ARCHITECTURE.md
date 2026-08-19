@@ -29,6 +29,10 @@ without changing presentation components.
 No long-lived private key belongs in application configuration, logs, or web
 storage.
 
+The first client-side transport primitives are specified in
+`OBSERVER_TRANSPORT.md`: a device identity held in the OS keyring and a strict
+Rust validation/decryption boundary for device-targeted observer frames.
+
 ## Cross-platform targets
 
 The Tauri shell targets macOS, Windows, and Linux. The UI is responsive and is

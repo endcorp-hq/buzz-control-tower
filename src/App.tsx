@@ -26,6 +26,10 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { dataSource } from "./dataSource";
+import {
+  loadDeviceIdentity,
+  type DeviceIdentityState,
+} from "./deviceIdentity";
 import type {
   ActivityEvent,
   AgentStatus,
@@ -72,9 +76,11 @@ function App() {
   const [search, setSearch] = useState("");
   const [expandedChannels, setExpandedChannels] = useState(() => new Set(["mos-boston", "buzz-control-tower"]));
   const [statusFilter, setStatusFilter] = useState<AgentStatus | "all">("all");
+  const [deviceIdentity, setDeviceIdentity] = useState<DeviceIdentityState>({ status: "loading" });
 
   useEffect(() => {
     void dataSource.loadSnapshot().then(setSnapshot);
+    void loadDeviceIdentity().then(setDeviceIdentity);
   }, []);
 
   const agents = useMemo(() => (snapshot ? allAgents(snapshot) : []), [snapshot]);
@@ -122,7 +128,10 @@ function App() {
         </div>
 
         <div className="topbar-center">
-          <span className="relay-indicator"><span className="relay-pulse" /> Fixture ready</span>
+          <span className="relay-indicator">
+            <span className={`relay-pulse${deviceIdentity.status === "error" ? " relay-error" : ""}`} />
+            {deviceIdentity.status === "ready" ? "Device ready" : deviceIdentity.status === "error" ? "Device error" : "Fixture ready"}
+          </span>
           <span className="topbar-divider" />
           <span>Fixture stream</span>
           <span className="snapshot-time">Snapshot {compactTime(snapshot.generatedAt)}</span>
@@ -223,7 +232,16 @@ function App() {
 
         <div className="security-note">
           <LockKeyhole size={15} />
-          <div><strong>Security boundary</strong><span>Live adapters will require encrypted, viewer-scoped grants.</span></div>
+          <div>
+            <strong>{deviceIdentity.status === "ready" ? `Device ${deviceIdentity.identity.fingerprint}` : "Security boundary"}</strong>
+            <span>
+              {deviceIdentity.status === "ready"
+                ? "Key secured in the OS keyring · observer grant pending."
+                : deviceIdentity.status === "error"
+                  ? "The OS keyring could not initialize the observer device."
+                  : "Live adapters require encrypted, viewer-scoped grants."}
+            </span>
+          </div>
         </div>
       </aside>
 

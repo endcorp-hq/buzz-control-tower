@@ -6,6 +6,10 @@ authors = ["Buzz Control Tower contributors"]
 edition = "2021"
 rust-version = "1.85"
 
+[features]
+default = ["system-keyring"]
+system-keyring = ["dep:keyring"]
+
 [lib]
 name = "buzz_control_tower_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -14,9 +18,21 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+nostr = { version = "0.44", features = ["nip44"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
+thiserror = "2"
+zeroize = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "vendored"], optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "vendored"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native", "vendored"], optional = true }
 
 [profile.release]
 panic = "abort"

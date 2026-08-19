@@ -48,6 +48,7 @@ button { color: inherit; }
 .topbar-center { justify-self: center; display: flex; align-items: center; gap: 13px; color: #7e838f; font: 10px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
 .relay-indicator { display: flex; align-items: center; gap: 7px; color: #a9dbbe; }
 .relay-pulse { width: 7px; height: 7px; border-radius: 999px; background: var(--green); box-shadow: 0 0 0 4px rgba(110, 231, 168, .08); }
+.relay-pulse.relay-error { background: var(--red); box-shadow: 0 0 0 4px rgba(255, 123, 123, .08); }
 .topbar-divider { height: 15px; width: 1px; background: var(--line); }
 .snapshot-time { color: #555b65; }
 
