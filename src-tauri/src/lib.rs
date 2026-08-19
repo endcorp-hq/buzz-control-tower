@@ -1,5 +1,7 @@
 mod device_identity;
-mod observer;
+mod relay_activity;
+
+use tauri::State;
 
 #[tauri::command]
 fn platform() -> &'static str {
@@ -7,34 +9,42 @@ fn platform() -> &'static str {
 }
 
 #[tauri::command]
-fn get_device_identity() -> Result<device_identity::DeviceIdentity, String> {
-    let (keys, created) = device_identity::load_or_create_device_keys()?;
+fn get_device_identity(
+    state: State<'_, device_identity::DeviceIdentityStore>,
+) -> Result<device_identity::DeviceIdentity, String> {
+    let (keys, created) = state.keys()?;
     Ok(device_identity::public_identity(&keys, created))
 }
 
 #[tauri::command]
-fn decrypt_observer_frame(
-    event_json: String,
-    expected_agent: Option<String>,
-    channel_id: Option<String>,
-) -> Result<observer::ValidatedObserverFrame, String> {
-    let (keys, _) = device_identity::load_or_create_device_keys()?;
-    observer::validate_and_decrypt(
+async fn load_channel_activity(
+    state: State<'_, device_identity::DeviceIdentityStore>,
+    relay_url: String,
+    channel_id: String,
+    author_pubkeys: Vec<String>,
+    since: Option<u64>,
+    limit: Option<u32>,
+) -> Result<relay_activity::RelayActivityPage, String> {
+    let (keys, _) = state.keys()?;
+    relay_activity::load_channel_activity(
         &keys,
-        &event_json,
-        expected_agent.as_deref(),
-        channel_id.as_deref(),
+        &relay_url,
+        &channel_id,
+        &author_pubkeys,
+        since,
+        limit,
     )
-    .map_err(|error| error.to_string())
+    .await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(device_identity::DeviceIdentityStore::default())
         .invoke_handler(tauri::generate_handler![
             platform,
             get_device_identity,
-            decrypt_observer_frame
+            load_channel_activity
         ])
         .run(tauri::generate_context!())
         .expect("error while running Buzz Control Tower");

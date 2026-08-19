@@ -44,6 +44,7 @@ export type Artifact = {
 
 export type AgentTurn = {
   id: string;
+  pubkey?: string;
   agentName: string;
   role: string;
   status: AgentStatus;
@@ -81,4 +82,15 @@ export type TowerSnapshot = {
   workspaceName: string;
   source: "fixture" | "relay";
   channels: Channel[];
+};
+
+export type DataConnection = {
+  state: "fixture" | "connected" | "setup-required" | "error";
+  label: string;
+  detail: string;
+};
+
+export type SnapshotLoadResult = {
+  snapshot: TowerSnapshot;
+  connection: DataConnection;
 };

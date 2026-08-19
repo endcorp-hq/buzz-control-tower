@@ -1,5 +1,6 @@
 use nostr::Keys;
 use serde::Serialize;
+use std::sync::Mutex;
 #[cfg(feature = "system-keyring")]
 use zeroize::Zeroizing;
 
@@ -15,6 +16,51 @@ pub struct DeviceIdentity {
     pub fingerprint: String,
     pub storage: &'static str,
     pub created: bool,
+}
+
+#[derive(Default)]
+enum CachedDeviceKeys {
+    #[default]
+    Empty,
+    Ready(Keys, bool),
+    Failed(String),
+}
+
+#[derive(Default)]
+pub struct DeviceIdentityStore {
+    inner: Mutex<CachedDeviceKeys>,
+}
+
+impl DeviceIdentityStore {
+    fn resolve_with(
+        &self,
+        loader: impl FnOnce() -> Result<(Keys, bool), String>,
+    ) -> Result<(Keys, bool), String> {
+        let mut cache = self
+            .inner
+            .lock()
+            .map_err(|_| "device identity cache lock is poisoned".to_string())?;
+        match &*cache {
+            CachedDeviceKeys::Ready(keys, created) => return Ok((keys.clone(), *created)),
+            CachedDeviceKeys::Failed(error) => return Err(error.clone()),
+            CachedDeviceKeys::Empty => {}
+        }
+
+        match loader() {
+            Ok((keys, created)) => {
+                *cache = CachedDeviceKeys::Ready(keys.clone(), created);
+                Ok((keys, created))
+            }
+            Err(error) => {
+                *cache = CachedDeviceKeys::Failed(error.clone());
+                Err(error)
+            }
+        }
+    }
+
+    pub fn keys(&self) -> Result<(Keys, bool), String> {
+        self.resolve_with(load_or_create_device_keys)
+    }
 }
 
 pub fn public_identity(keys: &Keys, created: bool) -> DeviceIdentity {
@@ -59,6 +105,7 @@ pub fn load_or_create_device_keys() -> Result<(Keys, bool), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     #[test]
     fn public_identity_never_exposes_secret_material() {
@@ -71,5 +118,44 @@ mod tests {
         assert!(!identity.pubkey.contains(&secret));
         assert_eq!(identity.storage, "system-keyring");
         assert!(identity.created);
+    }
+
+    #[test]
+    fn device_store_loads_the_keyring_only_once() {
+        let store = DeviceIdentityStore::default();
+        let calls = Cell::new(0);
+        let generated = Keys::generate();
+
+        let first = store
+            .resolve_with(|| {
+                calls.set(calls.get() + 1);
+                Ok((generated.clone(), true))
+            })
+            .expect("first load");
+        let second = store
+            .resolve_with(|| {
+                calls.set(calls.get() + 1);
+                Err("must not run".to_string())
+            })
+            .expect("cached load");
+
+        assert_eq!(calls.get(), 1);
+        assert_eq!(first.0.public_key(), second.0.public_key());
+    }
+
+    #[test]
+    fn device_store_caches_a_denied_keyring_read() {
+        let store = DeviceIdentityStore::default();
+        let calls = Cell::new(0);
+
+        for _ in 0..2 {
+            let result = store.resolve_with(|| {
+                calls.set(calls.get() + 1);
+                Err("keyring access denied".to_string())
+            });
+            assert_eq!(result.unwrap_err(), "keyring access denied");
+        }
+
+        assert_eq!(calls.get(), 1);
     }
 }

@@ -6,32 +6,32 @@ replace the Buzz desktop installer.
 ## Boundaries
 
 ```text
-Buzz relay / observer archive
+Buzz relay standard events
   -> DataSource adapter
   -> validated TowerSnapshot
   -> pure selectors and reducers
   -> React presentation
 ```
 
-The initial milestone uses a fixture `DataSource`. A relay source can replace it
-without changing presentation components.
+The companion owns a separate device identity in the OS keyring. That identity
+can be admitted to a relay and selected channels through existing Buzz
+administration. The relay adapter then issues signed, read-only NIP-98 queries
+for standard channel-visible events. Fixture mode remains the browser preview
+and authorization fallback.
 
 ## Security direction
 
-- Device-scoped keys, paired to a Buzz identity
-- NIP-42 relay authentication
-- Agent-signed, NIP-44-encrypted observer frames
-- Owner-signed grants scoped by viewer, agent, channel, visibility tier, and
-  expiry
-- Source-side redaction before encryption
-- Ephemeral live activity plus durable encrypted work snapshots
+- Device-scoped keys stored in the OS keyring
+- NIP-98-signed, read-only relay queries
+- Strict channel, author, kind, event-id, and signature validation
+- No owner key import or reuse
+- No inference that public messages expose private turns or supplied context
 
 No long-lived private key belongs in application configuration, logs, or web
 storage.
 
-The first client-side transport primitives are specified in
-`OBSERVER_TRANSPORT.md`: a device identity held in the OS keyring and a strict
-Rust validation/decryption boundary for device-targeted observer frames.
+The first companion-only transport slice is specified in
+`RELAY_ACTIVITY.md`.
 
 ## Cross-platform targets
 

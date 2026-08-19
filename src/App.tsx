@@ -37,6 +37,7 @@ import type {
   Artifact,
   ContextSource,
   DeliveryStage,
+  DataConnection,
   TowerSnapshot,
 } from "./domain";
 import { allAgents, countWorkingAgents, findAgent, matchesAgentSearch } from "./selectors";
@@ -71,17 +72,39 @@ function StatusDot({ status, pulse = false }: { status: AgentStatus; pulse?: boo
 
 function App() {
   const [snapshot, setSnapshot] = useState<TowerSnapshot>();
-  const [selectedId, setSelectedId] = useState("dany-loop");
+  const [connection, setConnection] = useState<DataConnection>({
+    state: "fixture",
+    label: "Fixture stream",
+    detail: "Starting the companion data source.",
+  });
+  const [selectedId, setSelectedId] = useState("fizz-control");
   const [activeTab, setActiveTab] = useState<DetailTab>("live");
   const [search, setSearch] = useState("");
   const [expandedChannels, setExpandedChannels] = useState(() => new Set(["mos-boston", "buzz-control-tower"]));
   const [statusFilter, setStatusFilter] = useState<AgentStatus | "all">("all");
   const [deviceIdentity, setDeviceIdentity] = useState<DeviceIdentityState>({ status: "loading" });
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const [refreshVersion, setRefreshVersion] = useState(0);
 
   useEffect(() => {
-    void dataSource.loadSnapshot().then(setSnapshot);
+    let cancelled = false;
+    let timer: number | undefined;
+    const refresh = async () => {
+      const result = await dataSource.loadSnapshot();
+      if (cancelled) return;
+      setSnapshot(result.snapshot);
+      setConnection(result.connection);
+      if (result.connection.state === "connected") {
+        timer = window.setTimeout(refresh, 5_000);
+      }
+    };
+    void refresh();
     void loadDeviceIdentity().then(setDeviceIdentity);
-  }, []);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [refreshVersion]);
 
   const agents = useMemo(() => (snapshot ? allAgents(snapshot) : []), [snapshot]);
   const selectedAgent = snapshot ? findAgent(snapshot, selectedId) : undefined;
@@ -116,6 +139,17 @@ function App() {
     });
   };
 
+  const copyDeviceKey = async () => {
+    if (deviceIdentity.status !== "ready") return;
+    try {
+      await navigator.clipboard.writeText(deviceIdentity.identity.pubkey);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 1_500);
+    } catch {
+      setCopyState("failed");
+    }
+  };
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -133,7 +167,7 @@ function App() {
             {deviceIdentity.status === "ready" ? "Device ready" : deviceIdentity.status === "error" ? "Device error" : "Fixture ready"}
           </span>
           <span className="topbar-divider" />
-          <span>Fixture stream</span>
+          <span className={`source-state source-${connection.state}`}>{connection.label}</span>
           <span className="snapshot-time">Snapshot {compactTime(snapshot.generatedAt)}</span>
         </div>
 
@@ -236,11 +270,21 @@ function App() {
             <strong>{deviceIdentity.status === "ready" ? `Device ${deviceIdentity.identity.fingerprint}` : "Security boundary"}</strong>
             <span>
               {deviceIdentity.status === "ready"
-                ? "Key secured in the OS keyring · observer grant pending."
+                ? connection.detail
                 : deviceIdentity.status === "error"
                   ? "The OS keyring could not initialize the observer device."
-                  : "Live adapters require encrypted, viewer-scoped grants."}
+                  : "Preparing a device-only identity for read-only relay access."}
             </span>
+            {deviceIdentity.status === "ready" && connection.state === "setup-required" && (
+              <div className="security-actions">
+                <button className="copy-device-key" onClick={copyDeviceKey}>
+                  {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy device key"}
+                </button>
+                <button className="copy-device-key" onClick={() => setRefreshVersion((version) => version + 1)}>
+                  Retry relay
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </aside>
@@ -266,7 +310,7 @@ function App() {
         <section className="provenance-strip">
           <div><GitBranch size={15} /><span>Branch</span><strong>{selectedAgent.branch}</strong></div>
           <div><GitCommitHorizontal size={15} /><span>HEAD</span><strong>{selectedAgent.head}</strong></div>
-          <div className="visibility-pill"><ShieldCheck size={14} /> Redacted semantic stream</div>
+          <div className="visibility-pill"><ShieldCheck size={14} /> {snapshot.source === "relay" ? "Signed public events" : "Fixture data"}</div>
         </section>
 
         <div className="tab-bar" role="tablist">

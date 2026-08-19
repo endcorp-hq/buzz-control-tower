@@ -11,7 +11,7 @@ installer. It targets macOS, Windows, and Linux through Tauri 2.
 - Channel → workstream → agent navigation
 - Live, context, evidence, and artifact detail views
 - Fixture-driven domain model with a clean relay-data boundary
-- Local-first desktop persistence and secure device identity in later slices
+- OS-keyring device identity and a read-only standard-event relay adapter
 
 ## Run the desktop MVP
 
@@ -25,8 +25,10 @@ corepack pnpm tauri dev
 
 Run the complete repository verification with `corepack pnpm check`.
 
-The first milestone intentionally uses a clearly labeled fixture data source.
-It proves the product hierarchy and interaction model without pretending that
-relay access grants or durable snapshots are already implemented.
+The app falls back to a clearly labeled fixture data source when its independent
+device identity has not been admitted to a Buzz relay and channel. Once
+authorized, it polls Buzz's existing signed `/query` interface for ordinary
+channel-visible events. It does not copy the owner's Buzz key and does not claim
+access to private agent turns, prompts, tool calls, or supplied context.
 
 See `docs/ARCHITECTURE.md` for the data and security boundaries.
