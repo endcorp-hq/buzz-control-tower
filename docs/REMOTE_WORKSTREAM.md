@@ -1,52 +1,72 @@
 # Remote workstream
 
-The first remote observability slice connects Control Tower to `mos-agent` on
-the Doha VM without modifying Buzz or copying runtime databases to the desktop.
+Control Tower reads the MOS agent fleet through one fixed, companion-owned
+collector on the Doha VM. Buzz is not modified, agent databases are never
+copied to the desktop, and no runtime service is restarted.
 
-## Source
+## Fleet sources
 
-The deployed Python exporter opens
-`/home/mos-agent/.local/share/opencode/opencode.db` in SQLite read-only mode.
-Its root-owned configuration binds it to:
+The live collector accounts for every configured source on every poll:
 
-- agent `mos-agent`
-- pubkey `e802d359…07fdd00`
-- channel `mos-boston` (`1da2b83b-c1e5-44b3-8a1c-546bf665933e`)
+| Agent | Source | State |
+| --- | --- | --- |
+| `mos-agent` | Doha `/home/mos-agent` | live |
+| `lucas-mos-agent` | Doha `/home/lucas-agent` | live |
+| `dany-mos-agent` | Doha `/home/dany-agent` | live |
+| `Thor` | Thor `/home/thor-worker` | live through fixed nested SSH |
+| `museum-bridge-mos-agent` | museum `/home/museum-bridge-worker` | live through fixed nested SSH |
+| `vivid-bridge-mos-agent` | Windows/WSL continuity runtime | explicitly unavailable after Thor promotion |
 
-The latest user message containing the exact channel UUID identifies the turn.
-The database belongs to the dedicated mos-agent account, while the fixed
-configuration supplies the agent identity; callers cannot select another
-database, agent, or channel.
+Each source has a root-owned configuration that fixes its database, exact
+agent name, full Nostr pubkey, source label, and allowed channel. A source
+failure becomes an unavailable agent card; it cannot erase healthy pages.
 
-## Transport
+## Desktop transport
 
-The Tauri native layer runs one fixed command on the fixed Doha Tailscale IP:
+The Tauri native layer executes only:
 
 ```text
-/usr/bin/ssh root@100.119.77.122 \
-  /usr/local/bin/control-tower-opencode-export <fixed identifiers>
+ssh control-tower@mos-agent.tailc8418d.ts.net \
+  /usr/local/bin/control-tower-fleet-export
 ```
 
-Batch mode and bounded connection/keepalive settings prevent credential prompts
-inside the app. The existing operating-system Tailscale SSH identity performs
-authentication. No VM password, SSH private key, bearer token, or Buzz private
-key is stored by Control Tower. There is no new listener or background service,
-and mos-agent is not restarted.
+The FQDN works for owner and externally shared Tailscale clients. Batch mode,
+accept-new host-key handling, bounded connection/keepalive settings, a 15-second
+deadline, and a 10 MiB response cap prevent interactive or unbounded behavior.
+No VM password, private SSH key, bearer token, or Buzz private key is stored by
+Control Tower.
+
+The `control-tower` Linux account has a root-owned login shell that accepts only
+the exact exporter command. Its only sudo capability is the no-argument,
+root-owned fleet exporter. Interactive shells, alternate commands, arguments,
+and file reads are rejected. Tailscale SSH policy maps only the approved Lucas
+and Dany external identities to that account.
+
+## Collector transport
+
+The Doha collector runs all six configured sources concurrently:
+
+- the three local databases are opened directly in SQLite read-only mode;
+- Thor and museum exporters are invoked through fixed host/user/command arrays
+  using mos-agent's existing production SSH identity;
+- the retired continuity source has no command and produces a fixed unavailable
+  record.
+
+Each child page is bounded to 2 MiB. The collector verifies the exact returned
+identity and source label. The Rust client verifies the entire six-source set,
+rejects duplicates/substitutions/omissions, reapplies redaction, and rejects
+schema bounds before anything reaches React.
 
 ## Exported semantics
 
 - turn start, request receipt, working, and completion state
-- OpenAI reasoning summaries that OpenCode stores separately from encrypted
-  reasoning content
+- OpenCode reasoning summaries stored separately from encrypted reasoning
 - tool type, title, status, allowlisted inputs, and bounded result
 - shell command and working directory
 - changed paths from patches, without patch bodies
 - assistant progress and final messages
 - runtime/trigger provenance fingerprints
-
-The source caps the page at 200 activity events and 2 MiB on the client. The
-native client verifies the expected channel, agent name, and pubkey, enforces
-collection bounds, and applies credential redaction again.
+- signed Buzz delivery messages from the matching agent only
 
 ## Withheld at source
 
@@ -54,12 +74,18 @@ collection bounds, and applies credential redaction again.
 - encrypted reasoning content and reasoning metadata
 - token counts, costs, and rate-limit metadata
 - patch bodies and file-read results
-- database paths outside the configured workspace
+- arbitrary database paths or caller-selected hosts/commands
 - credential-shaped values and full 64-character hex strings
 
-## Current scope
+## Tailscale sharing
 
-This milestone deliberately hard-codes the single approved Doha source. A later
-multi-agent version needs owner-managed remote profiles and equivalent sidecars
-on each host. Explicit signed evidence is still required before commit, push,
-PR, merge, or deployment stages can be marked complete.
+Doha is already shared to and accepted by `dany@vividstudio.me`. Device sharing
+lets that external user reach only the shared node while staying on their own
+tailnet; the owning tailnet's access policy still controls the connection. See
+the current Tailscale documentation on [machine sharing](https://tailscale.com/kb/1084/sharing)
+and [sharing access controls](https://tailscale.com/docs/features/sharing#sharing-and-access-control-policies).
+
+The reverse share visible for Dany's `desktop-vfmf3b6` is intentionally
+directional: it lets nilor reach that machine but does not grant that machine
+access to nilor nodes. The already-accepted Doha share supplies the opposite
+direction required by Control Tower.

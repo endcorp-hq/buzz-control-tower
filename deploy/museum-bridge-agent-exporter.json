@@ -1,0 +1,9 @@
+{
+  "agentName": "museum-bridge-mos-agent",
+  "agentPubkey": "21468ab6f07d19c38c3545f17f72a08e0d4bda4e1efe214e4177a860d8aa54a1",
+  "sourceLabel": "PSC · museum bridge",
+  "database": "/home/museum-bridge-worker/.local/share/opencode/opencode.db",
+  "allowedChannels": [
+    "1da2b83b-c1e5-44b3-8a1c-546bf665933e"
+  ]
+}

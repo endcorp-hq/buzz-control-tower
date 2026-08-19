@@ -1,0 +1,113 @@
+{
+  "sources": [
+    {
+      "agentPubkey": "e802d3594a2b31b22f35c6a42a17e1749d62decaceef5abe96841512607fdd00",
+      "agentName": "mos-agent",
+      "sourceLabel": "Doha · mos-agent",
+      "command": [
+        "/usr/bin/python3",
+        "/usr/local/lib/control-tower/opencode_sqlite_exporter.py",
+        "--config",
+        "/etc/control-tower/agents/mos-agent.json",
+        "--channel-id",
+        "1da2b83b-c1e5-44b3-8a1c-546bf665933e",
+        "--agent-pubkey",
+        "e802d3594a2b31b22f35c6a42a17e1749d62decaceef5abe96841512607fdd00",
+        "--agent-name",
+        "mos-agent"
+      ]
+    },
+    {
+      "agentPubkey": "f5171ae5d2877ab58ed3b38168728e32b31a956a64ba0159924ec4d21b77bd4f",
+      "agentName": "lucas-mos-agent",
+      "sourceLabel": "Doha · lucas-mos-agent",
+      "command": [
+        "/usr/bin/python3",
+        "/usr/local/lib/control-tower/opencode_sqlite_exporter.py",
+        "--config",
+        "/etc/control-tower/agents/lucas-mos-agent.json",
+        "--channel-id",
+        "1da2b83b-c1e5-44b3-8a1c-546bf665933e",
+        "--agent-pubkey",
+        "f5171ae5d2877ab58ed3b38168728e32b31a956a64ba0159924ec4d21b77bd4f",
+        "--agent-name",
+        "lucas-mos-agent"
+      ]
+    },
+    {
+      "agentPubkey": "9c16889d1df147e168507c362ea4c7532ddf3c4976e943f64eb070ae42d50405",
+      "agentName": "dany-mos-agent",
+      "sourceLabel": "Doha · dany-mos-agent",
+      "command": [
+        "/usr/bin/python3",
+        "/usr/local/lib/control-tower/opencode_sqlite_exporter.py",
+        "--config",
+        "/etc/control-tower/agents/dany-mos-agent.json",
+        "--channel-id",
+        "1da2b83b-c1e5-44b3-8a1c-546bf665933e",
+        "--agent-pubkey",
+        "9c16889d1df147e168507c362ea4c7532ddf3c4976e943f64eb070ae42d50405",
+        "--agent-name",
+        "dany-mos-agent"
+      ]
+    },
+    {
+      "agentPubkey": "963ba9398cb139ed5c7516924c3398e18699efbd9bb45d5eb03cfe43d25c6950",
+      "agentName": "vivid-bridge-mos-agent",
+      "sourceLabel": "Vivid studio · continuity bridge",
+      "disabledReason": "The Windows/WSL continuity agent is intentionally stopped after Thor promotion."
+    },
+    {
+      "agentPubkey": "ec6bc8dc548a6e3f63c8ffe5cc93092b9fbfe7888c4d941e0804182109fa617b",
+      "agentName": "Thor",
+      "sourceLabel": "Vivid studio · Thor",
+      "command": [
+        "/usr/bin/sudo",
+        "-u",
+        "mos-agent",
+        "/usr/bin/ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "vivid@100.83.32.31",
+        "/usr/bin/sudo",
+        "-n",
+        "/usr/local/bin/control-tower-opencode-export",
+        "--channel-id",
+        "1da2b83b-c1e5-44b3-8a1c-546bf665933e",
+        "--agent-pubkey",
+        "ec6bc8dc548a6e3f63c8ffe5cc93092b9fbfe7888c4d941e0804182109fa617b",
+        "--agent-name",
+        "Thor"
+      ]
+    },
+    {
+      "agentPubkey": "21468ab6f07d19c38c3545f17f72a08e0d4bda4e1efe214e4177a860d8aa54a1",
+      "agentName": "museum-bridge-mos-agent",
+      "sourceLabel": "PSC · museum bridge",
+      "command": [
+        "/usr/bin/sudo",
+        "-u",
+        "mos-agent",
+        "/usr/bin/ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "root@100.103.201.119",
+        "/usr/local/bin/control-tower-opencode-export",
+        "--channel-id",
+        "1da2b83b-c1e5-44b3-8a1c-546bf665933e",
+        "--agent-pubkey",
+        "21468ab6f07d19c38c3545f17f72a08e0d4bda4e1efe214e4177a860d8aa54a1",
+        "--agent-name",
+        "museum-bridge-mos-agent"
+      ]
+    }
+  ]
+}

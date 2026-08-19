@@ -13,7 +13,7 @@ installer. It targets macOS, Windows, and Linux through Tauri 2.
 - Fixture-driven domain model with a clean relay-data boundary
 - OS-keyring device identity and a read-only standard-event relay adapter
 - Source-redacted local Codex runtime workstream for the selected agent
-- Source-redacted remote OpenCode workstream for mos-agent on the Doha VM
+- Source-redacted MOS fleet workstreams through one forced-command Doha collector
 
 ## Run the desktop MVP
 
@@ -28,7 +28,7 @@ corepack pnpm tauri dev
 Run the complete repository verification with `corepack pnpm check`.
 
 The native app reads the selected local Codex rollout and the configured remote
-mos-agent OpenCode session. Each source reduces its current turn into lifecycle,
+MOS agent sessions. Each source reduces its current turn into lifecycle,
 tool, file-change, provenance, and artifact events before raw runtime data can
 reach the Tauri webview.
 Raw prompts, private model reasoning, encrypted content, token counts, and rate
@@ -44,5 +44,5 @@ data. It never copies the owner's Buzz key.
 
 See `docs/ARCHITECTURE.md` for the data and security boundaries.
 The local execution contract is specified in `docs/LOCAL_WORKSTREAM.md`.
-The first remote execution contract is specified in
-`docs/REMOTE_WORKSTREAM.md`.
+The fleet execution contract is specified in `docs/REMOTE_WORKSTREAM.md`.
+Dany's shared-node Windows handoff is specified in `docs/DANY_SETUP.md`.

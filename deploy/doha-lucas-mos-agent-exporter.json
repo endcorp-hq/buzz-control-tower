@@ -1,0 +1,9 @@
+{
+  "agentName": "lucas-mos-agent",
+  "agentPubkey": "f5171ae5d2877ab58ed3b38168728e32b31a956a64ba0159924ec4d21b77bd4f",
+  "sourceLabel": "Doha · lucas-mos-agent",
+  "database": "/home/lucas-agent/.local/share/opencode/opencode.db",
+  "allowedChannels": [
+    "1da2b83b-c1e5-44b3-8a1c-546bf665933e"
+  ]
+}

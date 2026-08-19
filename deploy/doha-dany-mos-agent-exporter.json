@@ -1,0 +1,9 @@
+{
+  "agentName": "dany-mos-agent",
+  "agentPubkey": "9c16889d1df147e168507c362ea4c7532ddf3c4976e943f64eb070ae42d50405",
+  "sourceLabel": "Doha · dany-mos-agent",
+  "database": "/home/dany-agent/.local/share/opencode/opencode.db",
+  "allowedChannels": [
+    "1da2b83b-c1e5-44b3-8a1c-546bf665933e"
+  ]
+}

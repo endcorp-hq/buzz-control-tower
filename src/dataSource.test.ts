@@ -136,6 +136,7 @@ describe("companion runtime snapshot", () => {
       channelId: "1da2b83b-c1e5-44b3-8a1c-546bf665933e",
       agentPubkey: "2".repeat(64),
       agentName: "mos-agent",
+      sourceLabel: "Doha · mos-agent",
       sessionId: "remote-session",
       turnId: "remote-turn",
       workspace: "mos-agent",
@@ -149,5 +150,20 @@ describe("companion runtime snapshot", () => {
     expect(snapshot.channels.map((channel) => channel.name)).toEqual(["mos-boston", "buzz-control-tower"]);
     expect(snapshot.channels[0].workstreams[0].agents[0].role).toContain("Doha");
     expect(snapshot.channels[1].workstreams[0].agents[0].role).toBe("Local agent runtime");
+  });
+
+  it("keeps configured but unavailable fleet agents visible", () => {
+    const snapshot = runtimePagesSnapshot([], [{
+      agentPubkey: "3".repeat(64),
+      agentName: "vivid-bridge-mos-agent",
+      sourceLabel: "Vivid studio · continuity bridge",
+      detail: "Continuity runtime is stopped.",
+    }]);
+
+    const agent = snapshot.channels[0].workstreams[0].agents[0];
+    expect(agent.agentName).toBe("vivid-bridge-mos-agent");
+    expect(agent.status).toBe("idle");
+    expect(agent.statusLabel).toBe("Unavailable");
+    expect(agent.operation).toContain("stopped");
   });
 });

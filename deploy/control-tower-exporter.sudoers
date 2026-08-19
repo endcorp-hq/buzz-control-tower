@@ -1,0 +1,3 @@
+# The SSH-facing account can run only the root-owned, no-argument fleet export.
+# Its login shell independently rejects every other remote command.
+control-tower ALL=(root) NOPASSWD: /usr/local/bin/control-tower-fleet-export

@@ -49,8 +49,8 @@ fn load_local_workstream(
 }
 
 #[tauri::command]
-fn load_doha_mos_workstream() -> Result<local_workstream::RuntimeWorkstreamPage, String> {
-    remote_workstream::load_doha_mos_workstream()
+fn load_mos_fleet_workstreams() -> Result<remote_workstream::RemoteFleetDocument, String> {
+    remote_workstream::load_mos_fleet_workstreams()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -62,7 +62,7 @@ pub fn run() {
             get_device_identity,
             load_channel_activity,
             load_local_workstream,
-            load_doha_mos_workstream
+            load_mos_fleet_workstreams
         ])
         .run(tauri::generate_context!())
         .expect("error while running Buzz Control Tower");

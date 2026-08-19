@@ -24,7 +24,10 @@ DEFAULT_CONFIG = "/etc/control-tower/opencode-exporter.json"
 MAX_ACTIVITY = 200
 MAX_VISIBLE_TEXT = 1_200
 MAX_VISIBLE_RESULT = 4_000
-MAX_DATABASE_BYTES = 2 * 1024 * 1024 * 1024
+# OpenCode databases are append-heavy and the long-running Dany agent is already
+# above 2 GiB. Keep a generous hard ceiling while still rejecting accidental or
+# substituted multi-terabyte paths before SQLite opens them.
+MAX_DATABASE_BYTES = 8 * 1024 * 1024 * 1024
 
 SECRET_ASSIGNMENT = re.compile(
     r"(?i)\b(api[_-]?key|secret|token|password|private[_-]?key)\s*[:=]\s*[\"']?[^\s\"'`]+"
@@ -373,6 +376,7 @@ def build_page(config: dict[str, Any], channel_id: str) -> dict[str, Any]:
     if len(activity) > MAX_ACTIVITY:
         activity = activity[:2] + activity[-(MAX_ACTIVITY - 2) :]
 
+    source_label = redacted(config.get("sourceLabel") or "OpenCode runtime", 120)
     context = [
         {
             "id": f"{message_id}-trigger",
@@ -386,7 +390,7 @@ def build_page(config: dict[str, Any], channel_id: str) -> dict[str, Any]:
         {
             "id": f"{session_id}-runtime",
             "kind": "repository",
-            "label": "Doha OpenCode runtime",
+            "label": source_label,
             "detail": "Session, workspace, model, and runtime metadata were supplied; raw instructions remain withheld.",
             "hash": short_hash(session_fingerprint),
             "size": byte_size(len(session_fingerprint)),
@@ -396,8 +400,8 @@ def build_page(config: dict[str, Any], channel_id: str) -> dict[str, Any]:
     evidence = [
         {
             "stage": "local",
-            "label": "Doha runtime observed",
-            "detail": "A source-redacted OpenCode workstream was read through Tailscale SSH.",
+            "label": f"{source_label} observed",
+            "detail": "A source-redacted OpenCode workstream was read through the fixed fleet transport.",
             "complete": True,
         },
         *[
@@ -422,6 +426,7 @@ def build_page(config: dict[str, Any], channel_id: str) -> dict[str, Any]:
         "channelId": channel_id,
         "agentPubkey": config["agentPubkey"],
         "agentName": config["agentName"],
+        "sourceLabel": source_label,
         "sessionId": session_id,
         "turnId": message_id,
         "status": status,

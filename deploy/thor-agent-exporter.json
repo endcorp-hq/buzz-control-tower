@@ -1,0 +1,9 @@
+{
+  "agentName": "Thor",
+  "agentPubkey": "ec6bc8dc548a6e3f63c8ffe5cc93092b9fbfe7888c4d941e0804182109fa617b",
+  "sourceLabel": "Vivid studio · Thor",
+  "database": "/home/thor-worker/.local/share/opencode/opencode.db",
+  "allowedChannels": [
+    "1da2b83b-c1e5-44b3-8a1c-546bf665933e"
+  ]
+}

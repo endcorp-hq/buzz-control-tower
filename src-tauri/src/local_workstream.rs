@@ -79,6 +79,8 @@ pub struct RuntimeWorkstreamPage {
     pub channel_id: String,
     pub agent_pubkey: String,
     pub agent_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_label: Option<String>,
     pub session_id: String,
     pub turn_id: String,
     pub status: String,
@@ -693,6 +695,7 @@ fn parse_workstream(
         channel_id: channel_id.to_string(),
         agent_pubkey: agent_pubkey.to_string(),
         agent_name: agent_name.to_string(),
+        source_label: None,
         session_id,
         turn_id,
         status: if completed_at.is_some() {

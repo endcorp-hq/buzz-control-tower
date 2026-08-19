@@ -1,0 +1,13 @@
+#!/bin/sh
+# Login shell for the collector-only Tailscale SSH account.
+# OpenSSH/Tailscale SSH invokes a login shell as: shell -c <remote command>.
+set -eu
+
+if [ "$#" -eq 2 ] \
+  && [ "$1" = "-c" ] \
+  && [ "$2" = "/usr/local/bin/control-tower-fleet-export" ]; then
+  exec /usr/bin/sudo -n /usr/local/bin/control-tower-fleet-export
+fi
+
+echo "control-tower: only the fixed fleet exporter is available" >&2
+exit 126
