@@ -1,6 +1,7 @@
 use nostr::{nips::nip44, Event, PublicKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use uuid::Uuid;
 use zeroize::Zeroize;
 
 pub const KIND_AGENT_OBSERVER_FRAME: u16 = 24_200;
@@ -28,6 +29,7 @@ pub struct ValidatedObserverFrame {
     pub event_id: String,
     pub agent_pubkey: String,
     pub recipient_pubkey: String,
+    pub grant_id: Option<String>,
     pub event: ObserverEvent,
 }
 
@@ -59,6 +61,8 @@ pub enum ObserverFrameError {
     PlaintextTooLarge,
     #[error("observer frame channel does not match the active channel")]
     WrongChannel,
+    #[error("observer frame grant tag must be a UUID")]
+    InvalidGrant,
 }
 
 fn single_tag<'a>(event: &'a Event, name: &'static str) -> Result<&'a str, ObserverFrameError> {
@@ -74,6 +78,24 @@ fn single_tag<'a>(event: &'a Event, name: &'static str) -> Result<&'a str, Obser
         return Err(ObserverFrameError::InvalidTag(name));
     }
     Ok(fields[1].as_str())
+}
+
+fn optional_single_tag<'a>(
+    event: &'a Event,
+    name: &'static str,
+) -> Result<Option<&'a str>, ObserverFrameError> {
+    let mut tags = event
+        .tags
+        .iter()
+        .filter(|tag| tag.as_slice().first().is_some_and(|value| value == name));
+    let Some(tag) = tags.next() else {
+        return Ok(None);
+    };
+    let fields = tag.as_slice();
+    if fields.len() != 2 || tags.next().is_some() {
+        return Err(ObserverFrameError::InvalidTag(name));
+    }
+    Ok(Some(fields[1].as_str()))
 }
 
 pub fn validate_and_decrypt(
@@ -94,6 +116,9 @@ pub fn validate_and_decrypt(
     let recipient = single_tag(&event, "p")?;
     let agent = single_tag(&event, "agent")?;
     let frame = single_tag(&event, "frame")?;
+    let grant_id = optional_single_tag(&event, "grant")?
+        .map(|value| Uuid::parse_str(value).map_err(|_| ObserverFrameError::InvalidGrant))
+        .transpose()?;
     if frame != "telemetry" {
         return Err(ObserverFrameError::WrongDirection);
     }
@@ -135,6 +160,7 @@ pub fn validate_and_decrypt(
         event_id: event.id.to_hex(),
         agent_pubkey: agent.to_string(),
         recipient_pubkey: recipient.to_string(),
+        grant_id: grant_id.map(|value| value.to_string()),
         event: parsed,
     })
 }
@@ -192,6 +218,7 @@ mod tests {
 
         assert_eq!(decoded.agent_pubkey, agent.public_key().to_hex());
         assert_eq!(decoded.recipient_pubkey, device.public_key().to_hex());
+        assert_eq!(decoded.grant_id, None);
         assert_eq!(decoded.event, payload());
     }
 
@@ -316,6 +343,58 @@ mod tests {
                 None,
             ),
             Err(ObserverFrameError::InvalidTag("p"))
+        ));
+    }
+
+    #[test]
+    fn accepts_one_canonical_grant_id_and_rejects_duplicates() {
+        let agent = Keys::generate();
+        let device = Keys::generate();
+        let grant_id = Uuid::parse_str("9a49426c-fd8a-4f2f-a2ee-64922c74fa33").expect("grant UUID");
+        let plaintext = serde_json::to_string(&payload()).expect("serialize payload");
+        let encrypted = nip44::encrypt(
+            agent.secret_key(),
+            &device.public_key(),
+            plaintext,
+            nip44::Version::V2,
+        )
+        .expect("encrypt payload");
+        let event = EventBuilder::new(Kind::Custom(KIND_AGENT_OBSERVER_FRAME), encrypted.clone())
+            .tags([
+                Tag::parse(["p", &device.public_key().to_hex()]).expect("p tag"),
+                Tag::parse(["agent", &agent.public_key().to_hex()]).expect("agent tag"),
+                Tag::parse(["frame", "telemetry"]).expect("frame tag"),
+                Tag::parse(["grant", &grant_id.to_string()]).expect("grant tag"),
+            ])
+            .sign_with_keys(&agent)
+            .expect("sign frame");
+        let decoded = validate_and_decrypt(
+            &device,
+            &serde_json::to_string(&event).expect("event JSON"),
+            None,
+            None,
+        )
+        .expect("granted frame");
+        assert_eq!(decoded.grant_id, Some(grant_id.to_string()));
+
+        let duplicate = EventBuilder::new(Kind::Custom(KIND_AGENT_OBSERVER_FRAME), encrypted)
+            .tags([
+                Tag::parse(["p", &device.public_key().to_hex()]).expect("p tag"),
+                Tag::parse(["agent", &agent.public_key().to_hex()]).expect("agent tag"),
+                Tag::parse(["frame", "telemetry"]).expect("frame tag"),
+                Tag::parse(["grant", &grant_id.to_string()]).expect("grant tag"),
+                Tag::parse(["grant", &grant_id.to_string()]).expect("second grant tag"),
+            ])
+            .sign_with_keys(&agent)
+            .expect("sign duplicate frame");
+        assert!(matches!(
+            validate_and_decrypt(
+                &device,
+                &serde_json::to_string(&duplicate).expect("event JSON"),
+                None,
+                None,
+            ),
+            Err(ObserverFrameError::InvalidTag("grant"))
         ));
     }
 
