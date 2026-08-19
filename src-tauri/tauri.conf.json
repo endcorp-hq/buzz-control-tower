@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Buzz Control Tower",
+  "version": "0.1.0",
+  "identifier": "cool.nilor.buzz-control-tower",
+  "build": {
+    "beforeDevCommand": "corepack pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "corepack pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Buzz Control Tower",
+        "width": 1440,
+        "height": 920,
+        "minWidth": 1080,
+        "minHeight": 680,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:* wss://*"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": "all"
+  }
+}
