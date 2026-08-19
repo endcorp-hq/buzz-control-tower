@@ -15,6 +15,8 @@ export type ActivityEvent = {
   title: string;
   detail: string;
   status?: "running" | "complete" | "failed";
+  parameters?: Array<{ label: string; value: string }>;
+  result?: string;
 };
 
 export type ContextSource = {
@@ -80,7 +82,7 @@ export type TowerSnapshot = {
   generatedAt: string;
   viewerName: string;
   workspaceName: string;
-  source: "fixture" | "relay";
+  source: "fixture" | "relay" | "runtime";
   channels: Channel[];
 };
 

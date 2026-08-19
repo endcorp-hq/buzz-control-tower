@@ -310,7 +310,7 @@ function App() {
         <section className="provenance-strip">
           <div><GitBranch size={15} /><span>Branch</span><strong>{selectedAgent.branch}</strong></div>
           <div><GitCommitHorizontal size={15} /><span>HEAD</span><strong>{selectedAgent.head}</strong></div>
-          <div className="visibility-pill"><ShieldCheck size={14} /> {snapshot.source === "relay" ? "Signed public events" : "Fixture data"}</div>
+          <div className="visibility-pill"><ShieldCheck size={14} /> {snapshot.source === "runtime" ? "Source-redacted runtime" : snapshot.source === "relay" ? "Signed public events" : "Fixture data"}</div>
         </section>
 
         <div className="tab-bar" role="tablist">
@@ -364,7 +364,27 @@ function LiveView({ events, agent }: { events: ActivityEvent[]; agent: AgentTurn
               </div>
               {index < events.length - 1 && <span className="timeline-line" />}
               <time>{event.at}</time>
-              <div className="timeline-copy"><strong>{event.title}</strong><p>{event.detail}</p></div>
+              <div className="timeline-copy">
+                <strong>{event.title}</strong>
+                <p>{event.detail}</p>
+                {((event.parameters?.length ?? 0) > 0 || event.result) && (
+                  <details className="event-details" open={event.status === "running"}>
+                    <summary>Details</summary>
+                    {event.parameters?.map((parameter) => (
+                      <div className="event-parameter" key={`${event.id}-${parameter.label}`}>
+                        <span>{parameter.label}</span>
+                        <pre>{parameter.value}</pre>
+                      </div>
+                    ))}
+                    {event.result && (
+                      <div className="event-parameter">
+                        <span>Result</span>
+                        <pre>{event.result}</pre>
+                      </div>
+                    )}
+                  </details>
+                )}
+              </div>
               <span className={`event-kind kind-${event.kind}`}>{event.kind}</span>
             </article>
           ))}
