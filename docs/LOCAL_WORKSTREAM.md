@@ -41,9 +41,10 @@ also withheld because a generic observer cannot reliably distinguish public
 identifiers from private key material by shape alone. Tool details are
 expandable in the desktop timeline.
 
-## Honest limitations
+## Boundaries
 
-This slice observes a local Codex runtime only. Remote agents need the same
-reducer deployed beside their runtime and a separate authenticated transport.
 It does not infer commits, pull requests, merges, or deployments from shell
 activity; those stages require explicit signed evidence.
+
+Remote OpenCode runtimes use a separate sidecar contract described in
+`REMOTE_WORKSTREAM.md`; local rollout files are never copied to that path.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   relaySnapshot,
+  runtimePagesSnapshot,
   runtimeSnapshot,
   type RelayActivityPage,
   type RuntimeWorkstreamPage,
@@ -111,5 +112,42 @@ describe("companion runtime snapshot", () => {
     expect(agent.activity.some((event) => event.title === "Delivered to Buzz")).toBe(true);
     expect(agent.context).toHaveLength(1);
     expect(agent.evidence[0].label).toBe("Runtime observed");
+  });
+
+  it("groups local and remote agents into their channel work graphs", () => {
+    const base: RuntimeWorkstreamPage = {
+      channelId: "0b7c0958-3f7f-48c8-af3f-31e549b10e31",
+      agentPubkey: "1".repeat(64),
+      agentName: "Local agent",
+      sessionId: "local-session",
+      turnId: "local-turn",
+      status: "complete",
+      startedAt: "2027-01-15T08:00:00Z",
+      completedAt: "2027-01-15T08:00:01Z",
+      model: "local-model",
+      workspace: "local",
+      activity: [],
+      context: [],
+      evidence: [],
+      artifacts: [],
+    };
+    const remote = {
+      ...base,
+      channelId: "1da2b83b-c1e5-44b3-8a1c-546bf665933e",
+      agentPubkey: "2".repeat(64),
+      agentName: "mos-agent",
+      sessionId: "remote-session",
+      turnId: "remote-turn",
+      workspace: "mos-agent",
+    };
+
+    const snapshot = runtimePagesSnapshot([
+      { page: remote, origin: "remote" },
+      { page: base, origin: "local" },
+    ]);
+
+    expect(snapshot.channels.map((channel) => channel.name)).toEqual(["mos-boston", "buzz-control-tower"]);
+    expect(snapshot.channels[0].workstreams[0].agents[0].role).toContain("Doha");
+    expect(snapshot.channels[1].workstreams[0].agents[0].role).toBe("Local agent runtime");
   });
 });

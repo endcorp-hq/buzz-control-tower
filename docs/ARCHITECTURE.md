@@ -6,11 +6,11 @@ replace the Buzz desktop installer.
 ## Boundaries
 
 ```text
-Local Codex rollout JSONL             Buzz relay standard events
-  -> native source redactor             -> signed read-only relay adapter
-  -> semantic runtime page              -> validated delivery messages
-                 \                       /
-                  -> DataSource adapter
+Local Codex rollout JSONL          Doha OpenCode SQLite         Buzz relay events
+  -> native source redactor          -> sidecar redactor          -> signed adapter
+  -> semantic runtime page           -> Tailscale SSH JSON        -> delivery messages
+                 \                     |                         /
+                  \_________________ DataSource adapter ________/
   -> validated TowerSnapshot
   -> pure selectors and reducers
   -> React presentation
@@ -30,6 +30,13 @@ UI-visible thinking summaries and local tool parameters/results are retained to
 match Buzz's own local activity feed, after source-side credential redaction and
 length limits.
 
+For mos-agent, a root-owned exporter beside OpenCode opens its SQLite database
+read-only and emits the same bounded semantic page. The desktop invokes only a
+fixed host and command through the operating system SSH client. Tailscale owns
+authentication outside the app; Control Tower stores no VM password, SSH key,
+access token, or Buzz key. The remote page is identity-checked and redacted a
+second time in native Rust before React receives it.
+
 ## Security direction
 
 - Device-scoped keys stored in the OS keyring
@@ -44,6 +51,8 @@ length limits.
   summaries for local activity-feed parity
 - Prompt and runtime-context provenance represented only by a short SHA-256
   fingerprint and byte size
+- Remote exporter allowlist fixed to one agent identity and approved channel
+- Fixed remote command surface; the webview cannot choose a host or command
 
 No long-lived private key belongs in application configuration, logs, or web
 storage.
@@ -51,6 +60,8 @@ storage.
 The first companion-only transport slice is specified in
 `RELAY_ACTIVITY.md`.
 The first real execution-stream slice is specified in `LOCAL_WORKSTREAM.md`.
+The first remote execution-stream slice is specified in
+`REMOTE_WORKSTREAM.md`.
 
 ## Cross-platform targets
 

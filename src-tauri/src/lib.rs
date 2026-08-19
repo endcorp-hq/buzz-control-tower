@@ -1,6 +1,7 @@
 mod device_identity;
 mod local_workstream;
 mod relay_activity;
+mod remote_workstream;
 
 use tauri::State;
 
@@ -47,6 +48,11 @@ fn load_local_workstream(
     local_workstream::load_local_workstream(&channel_id, &agent_pubkey, &agent_name)
 }
 
+#[tauri::command]
+fn load_doha_mos_workstream() -> Result<local_workstream::RuntimeWorkstreamPage, String> {
+    remote_workstream::load_doha_mos_workstream()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -55,7 +61,8 @@ pub fn run() {
             platform,
             get_device_identity,
             load_channel_activity,
-            load_local_workstream
+            load_local_workstream,
+            load_doha_mos_workstream
         ])
         .run(tauri::generate_context!())
         .expect("error while running Buzz Control Tower");

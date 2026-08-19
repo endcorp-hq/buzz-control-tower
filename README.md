@@ -13,6 +13,7 @@ installer. It targets macOS, Windows, and Linux through Tauri 2.
 - Fixture-driven domain model with a clean relay-data boundary
 - OS-keyring device identity and a read-only standard-event relay adapter
 - Source-redacted local Codex runtime workstream for the selected agent
+- Source-redacted remote OpenCode workstream for mos-agent on the Doha VM
 
 ## Run the desktop MVP
 
@@ -26,9 +27,10 @@ corepack pnpm tauri dev
 
 Run the complete repository verification with `corepack pnpm check`.
 
-The native app first looks for the selected agent's matching local Codex
-rollout. It reduces the current turn into lifecycle, tool, file-change,
-provenance, and artifact events before anything crosses the Tauri boundary.
+The native app reads the selected local Codex rollout and the configured remote
+mos-agent OpenCode session. Each source reduces its current turn into lifecycle,
+tool, file-change, provenance, and artifact events before raw runtime data can
+reach the Tauri webview.
 Raw prompts, private model reasoning, encrypted content, token counts, and rate
 limits are discarded. The local owner view retains the same UI-visible thinking
 summaries, tool parameters, and tool results available in Buzz's local activity
@@ -42,3 +44,5 @@ data. It never copies the owner's Buzz key.
 
 See `docs/ARCHITECTURE.md` for the data and security boundaries.
 The local execution contract is specified in `docs/LOCAL_WORKSTREAM.md`.
+The first remote execution contract is specified in
+`docs/REMOTE_WORKSTREAM.md`.

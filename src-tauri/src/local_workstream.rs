@@ -22,14 +22,14 @@ const MAX_ACTIVITY_EVENTS: usize = 200;
 const MAX_VISIBLE_TEXT: usize = 1_200;
 const MAX_VISIBLE_RESULT: usize = 4_000;
 
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeParameter {
     pub label: String,
     pub value: String,
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeActivity {
     pub id: String,
@@ -42,7 +42,7 @@ pub struct RuntimeActivity {
     pub result: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeContextSource {
     pub id: String,
@@ -54,7 +54,7 @@ pub struct RuntimeContextSource {
     pub visibility: String,
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeEvidence {
     pub stage: String,
@@ -63,7 +63,7 @@ pub struct RuntimeEvidence {
     pub complete: bool,
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeArtifact {
     pub id: String,
@@ -73,7 +73,7 @@ pub struct RuntimeArtifact {
     pub changed_at: String,
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeWorkstreamPage {
     pub channel_id: String,
@@ -212,11 +212,11 @@ fn redact_with_limit(value: &str, limit: usize) -> String {
     truncate_to(&hex, limit)
 }
 
-fn redact_visible(value: &str) -> String {
+pub(crate) fn redact_visible(value: &str) -> String {
     redact_with_limit(value, MAX_VISIBLE_TEXT)
 }
 
-fn redact_result(value: &str) -> String {
+pub(crate) fn redact_result(value: &str) -> String {
     redact_with_limit(value, MAX_VISIBLE_RESULT)
 }
 

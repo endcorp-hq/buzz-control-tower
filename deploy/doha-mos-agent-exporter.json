@@ -1,0 +1,8 @@
+{
+  "agentName": "mos-agent",
+  "agentPubkey": "e802d3594a2b31b22f35c6a42a17e1749d62decaceef5abe96841512607fdd00",
+  "database": "/home/mos-agent/.local/share/opencode/opencode.db",
+  "allowedChannels": [
+    "1da2b83b-c1e5-44b3-8a1c-546bf665933e"
+  ]
+}

@@ -25,7 +25,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ComponentType } from "react";
-import { dataSource } from "./dataSource";
+import { dataSource, MOS_AGENT_PUBKEY } from "./dataSource";
 import {
   loadDeviceIdentity,
   type DeviceIdentityState,
@@ -77,7 +77,7 @@ function App() {
     label: "Fixture stream",
     detail: "Starting the companion data source.",
   });
-  const [selectedId, setSelectedId] = useState("fizz-control");
+  const [selectedId, setSelectedId] = useState(MOS_AGENT_PUBKEY);
   const [activeTab, setActiveTab] = useState<DetailTab>("live");
   const [search, setSearch] = useState("");
   const [expandedChannels, setExpandedChannels] = useState(() => new Set(["mos-boston", "buzz-control-tower"]));
@@ -107,7 +107,7 @@ function App() {
   }, [refreshVersion]);
 
   const agents = useMemo(() => (snapshot ? allAgents(snapshot) : []), [snapshot]);
-  const selectedAgent = snapshot ? findAgent(snapshot, selectedId) : undefined;
+  const selectedAgent = snapshot ? findAgent(snapshot, selectedId) ?? agents[0] : undefined;
 
   if (!snapshot || !selectedAgent) {
     return (

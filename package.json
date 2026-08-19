@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
-    "check": "corepack pnpm typecheck && corepack pnpm test && corepack pnpm build && cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:exporter": "python3 -m unittest discover -s exporters -p 'test_*.py'",
+    "check": "corepack pnpm typecheck && corepack pnpm test && corepack pnpm test:exporter && corepack pnpm build && cargo test --manifest-path src-tauri/Cargo.toml",
     "tauri": "tauri"
   },
   "dependencies": {
