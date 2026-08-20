@@ -17,12 +17,14 @@
 
 * { box-sizing: border-box; }
 
-body { margin: 0; min-width: 320px; min-height: 100vh; overflow: hidden; }
+html, body, #root { height: 100%; }
+body { margin: 0; min-width: 320px; overflow: hidden; }
 button, input { font: inherit; }
 button { color: inherit; }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
   display: grid;
   grid-template: 64px minmax(0, 1fr) / 318px minmax(0, 1fr);
   background:
@@ -116,7 +118,7 @@ button { color: inherit; }
 .copy-device-key { align-self: flex-start; margin-top: 3px; padding: 5px 7px; border: 1px solid rgba(246,184,74,.18); border-radius: 5px; color: #caa45f; background: rgba(246,184,74,.06); font: 8px var(--mono); cursor: pointer; }
 .copy-device-key:hover { border-color: rgba(246,184,74,.34); background: rgba(246,184,74,.1); }
 
-.workspace { min-width: 0; min-height: 0; overflow-y: auto; background: rgba(12, 13, 17, .7); }
+.workspace { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #282c34 transparent; background: rgba(12, 13, 17, .7); }
 .agent-hero { min-height: 163px; display: flex; justify-content: space-between; align-items: center; gap: 40px; padding: 30px 42px 26px; border-bottom: 1px solid var(--line); }
 .agent-identity { display: flex; align-items: center; gap: 18px; min-width: 0; }
 .agent-glyph { width: 52px; height: 52px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 14px; border: 1px solid var(--line); background: linear-gradient(145deg, #1d2027, #121419); color: #8e949f; }
@@ -232,7 +234,7 @@ button { color: inherit; }
 
 @media (max-width: 760px) {
   body { overflow: auto; }
-  .app-shell { min-height: 100vh; display: block; }
+  .app-shell { height: auto; min-height: 100vh; display: block; }
   .topbar { position: sticky; top: 0; height: 58px; display: flex; justify-content: space-between; }
   .brand-block { border: 0; }
   .topbar-center, .viewer-copy { display: none; }
