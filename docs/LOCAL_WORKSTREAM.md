@@ -21,7 +21,12 @@ turn is reduced.
 - UI-visible thinking summaries already exposed by Buzz's local activity feed
 - Successful or failed file-change summaries
 - Workspace-relative artifacts
-- Trigger and runtime-context fingerprints, sizes, and visibility
+- The bounded, credential-redacted human-authored `Content:` field from the
+  triggering Buzz event when it can be isolated from the runtime envelope
+- Safe runtime fields such as workspace name, model, approval policy, and
+  sandbox policy
+- Fingerprints, sizes, and visibility reasons for base/system instructions,
+  durable memory, canvas state, and the surrounding thread envelope
 - Signed Buzz messages from the existing relay adapter as delivery evidence
 
 ## Source redaction
@@ -29,17 +34,19 @@ turn is reduced.
 The native boundary never exports:
 
 - private response-item reasoning, encrypted reasoning, or chain-of-thought
-- raw user prompts, system instructions, or durable memory
+- the raw combined user prompt, system instructions, durable memory, canvas
+  body, or surrounding thread envelope
 - encrypted model content
 - token counts or rate-limit metadata
 - file contents or patch bodies
 
-Local tool commands, working directories, results, thinking summaries, and
-user-visible agent updates pass through credential-pattern redaction and length
-caps before they cross the Tauri boundary. Full 64-character hex tokens are
-also withheld because a generic observer cannot reliably distinguish public
-identifiers from private key material by shape alone. Tool details are
-expandable in the desktop timeline.
+The isolated Buzz request, local tool commands, working directories, results,
+thinking summaries, runtime fields, and user-visible agent updates pass through
+credential-pattern redaction and length caps before they cross the Tauri
+boundary. Full 64-character hex tokens are also withheld because a generic
+observer cannot reliably distinguish public identifiers from private key
+material by shape alone. Tool and context details are expandable in the desktop
+UI.
 
 ## Boundaries
 

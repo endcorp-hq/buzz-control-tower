@@ -71,7 +71,9 @@ describe("companion runtime snapshot", () => {
           detail: "Content withheld.",
           hash: "abcdef123456",
           size: "2.1 KiB",
-          visibility: "provenance",
+          visibility: "summary",
+          content: "Make context inspectable.",
+          fields: [{ label: "Channel", value: "buzz-control-tower" }],
         },
       ],
       evidence: [
@@ -111,6 +113,8 @@ describe("companion runtime snapshot", () => {
     ]);
     expect(agent.activity.some((event) => event.title === "Delivered to Buzz")).toBe(true);
     expect(agent.context).toHaveLength(1);
+    expect(agent.context[0].content).toBe("Make context inspectable.");
+    expect(agent.context[0].fields?.[0].value).toBe("buzz-control-tower");
     expect(agent.evidence[0].label).toBe("Runtime observed");
   });
 

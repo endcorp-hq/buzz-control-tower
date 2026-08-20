@@ -47,7 +47,21 @@ class OpenCodeExporterTest(unittest.TestCase):
                 "session",
                 base,
                 base,
-                json.dumps({"type": "text", "text": f"Channel: test (#{self.channel})\nprivate prompt"}),
+                json.dumps(
+                    {
+                        "type": "text",
+                        "text": (
+                            "[Base]\nprivate platform policy\n"
+                            "[Agent Memory — core]\ntoken=private-memory\n"
+                            f"[Context]\nChannel: test (#{self.channel})\n"
+                            "[Buzz event: @mention]\n"
+                            "Event ID: abc\n"
+                            "Content: Please make context inspectable; api_key=private-request\n"
+                            "Tags: []\n"
+                            "Parsed: mentions=[]"
+                        ),
+                    }
+                ),
             ),
         )
         connection.execute(
@@ -149,6 +163,16 @@ class OpenCodeExporterTest(unittest.TestCase):
         self.assertNotIn("private file body", serialized)
         self.assertNotIn("secret patch body", serialized)
         self.assertNotIn("reasoningEncryptedContent", serialized)
+        self.assertNotIn("private platform policy", serialized)
+        self.assertNotIn("private-memory", serialized)
+        self.assertNotIn("private-request", serialized)
+        trigger = next(source for source in page["context"] if source["label"] == "Triggering Buzz turn")
+        self.assertEqual(trigger["content"], "Please make context inspectable; api_key=[redacted]")
+        runtime = next(source for source in page["context"] if source["kind"] == "repository")
+        self.assertEqual(runtime["fields"][0], {"label": "Workspace", "value": "workspace"})
+        memory = next(source for source in page["context"] if source["kind"] == "memory")
+        self.assertIsNone(memory["content"])
+        self.assertIn("durable memory", memory["withheldReason"])
         read_event = next(event for event in page["activity"] if event["id"] == "read")
         self.assertIsNone(read_event["result"])
 

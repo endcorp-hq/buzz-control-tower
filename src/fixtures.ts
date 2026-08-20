@@ -72,6 +72,7 @@ export const fixtureSnapshot: TowerSnapshot = {
                   hash: "e97c…41a2",
                   size: "8.4 KB",
                   visibility: "provenance",
+                  withheldReason: "Raw platform instructions remain at the runtime source.",
                 },
                 {
                   id: "c2",
@@ -81,6 +82,8 @@ export const fixtureSnapshot: TowerSnapshot = {
                   hash: "b402…f12c",
                   size: "14.7 KB",
                   visibility: "full",
+                  content: "Please verify the museum bridge generation loop and report the exact delivery evidence.",
+                  fields: [{ label: "Thread root", value: "e5200f09…" }],
                 },
                 {
                   id: "c3",

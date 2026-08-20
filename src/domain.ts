@@ -27,6 +27,9 @@ export type ContextSource = {
   hash: string;
   size: string;
   visibility: "summary" | "provenance" | "full";
+  content?: string;
+  fields?: Array<{ label: string; value: string }>;
+  withheldReason?: string;
 };
 
 export type Evidence = {

@@ -65,12 +65,15 @@ schema bounds before anything reaches React.
 - shell command and working directory
 - changed paths from patches, without patch bodies
 - assistant progress and final messages
-- runtime/trigger provenance fingerprints
+- the isolated, bounded, credential-redacted human-authored Buzz request
+- safe workspace/model/runtime-version/source fields
+- runtime/trigger provenance fingerprints plus explicit visibility boundaries
 - signed Buzz delivery messages from the matching agent only
 
 ## Withheld at source
 
-- raw user messages, system/team instructions, and durable memory
+- the raw combined user prompt, system/team instructions, durable memory,
+  canvas body, and surrounding thread envelope
 - encrypted reasoning content and reasoning metadata
 - token counts, costs, and rate-limit metadata
 - patch bodies and file-read results

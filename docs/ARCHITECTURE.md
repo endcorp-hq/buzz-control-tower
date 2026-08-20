@@ -25,7 +25,10 @@ and authorization fallback.
 For a local agent, the native runtime adapter selects the newest Codex rollout
 whose latest trigger contains both the requested channel UUID and agent pubkey.
 It reduces only the latest turn. The React layer never receives the rollout
-file, raw JSON, prompts, private response-item reasoning, or encrypted content.
+file, raw JSON, combined prompt envelope, private response-item reasoning, or
+encrypted content. The native reducer may isolate the final Buzz event's
+human-authored `Content:` field, credential-redact it, and cap it at 4,000
+characters for the context drawer.
 UI-visible thinking summaries and local tool parameters/results are retained to
 match Buzz's own local activity feed, after source-side credential redaction and
 length limits.
@@ -45,12 +48,14 @@ second time in native Rust before React receives it.
 - No owner key import or reuse
 - No inference that public messages expose private turns or supplied context
 - Local runtime selection bound to an explicit channel UUID and agent pubkey
-- Source-side omission of private response-item reasoning, prompts, encrypted
-  content, token counts, and rate-limit metadata
+- Source-side omission of private response-item reasoning, combined prompt
+  envelopes, system instructions, memory/canvas bodies, encrypted content,
+  token counts, and rate-limit metadata
 - Credential-redacted local tool parameters/results and UI-visible thinking
   summaries for local activity-feed parity
-- Prompt and runtime-context provenance represented only by a short SHA-256
-  fingerprint and byte size
+- Withheld context represented by a short SHA-256 fingerprint, byte size, and
+  explicit reason; isolated human requests and safe runtime fields remain
+  inspectable
 - Remote exporter allowlist fixed to one agent identity and approved channel
 - Fixed remote command surface; the webview cannot choose a host or command
 

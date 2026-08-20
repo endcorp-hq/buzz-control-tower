@@ -24,6 +24,7 @@ DEFAULT_CONFIG = "/etc/control-tower/opencode-exporter.json"
 MAX_ACTIVITY = 200
 MAX_VISIBLE_TEXT = 1_200
 MAX_VISIBLE_RESULT = 4_000
+MAX_CONTEXT_SOURCES = 16
 # OpenCode databases are append-heavy and the long-running Dany agent is already
 # above 2 GiB. Keep a generous hard ceiling while still rejecting accidental or
 # substituted multi-terabyte paths before SQLite opens them.
@@ -37,6 +38,35 @@ PRIVATE_SIZED_HEX = re.compile(r"\b[0-9a-fA-F]{64}\b")
 CHANNEL_ID = re.compile(r"^[0-9a-fA-F-]{36}$")
 PUBKEY = re.compile(r"^[0-9a-f]{64}$")
 PATCH_PATH = re.compile(r"^(?:\+\+\+|---)\s+(?:[ab]/)?(.+)$", re.MULTILINE)
+CONTEXT_HEADER = re.compile(r"(?m)^\[([^\]\r\n]{1,96})\]\s*$")
+
+WITHHELD_CONTEXT = {
+    "base": (
+        "base",
+        "Base instructions",
+        "Raw platform instructions stay at the runtime source because they can contain security policy and internal control text.",
+    ),
+    "system": (
+        "team",
+        "System and team instructions",
+        "Raw system and team instructions stay at the runtime source because they can contain operational policy and private workspace guidance.",
+    ),
+    "agent memory — core": (
+        "memory",
+        "Agent memory",
+        "Raw durable memory stays at the runtime source because it can contain private operational history or credential-adjacent material.",
+    ),
+    "channel canvas": (
+        "canvas",
+        "Channel canvas",
+        "The canvas body stays in Buzz; this record proves which injected revision shaped the turn without duplicating channel state.",
+    ),
+    "context": (
+        "thread",
+        "Thread envelope",
+        "The full thread envelope stays at the runtime source. The human-authored triggering request is exposed separately when it can be isolated safely.",
+    ),
+}
 
 
 def fail(message: str) -> None:
@@ -76,6 +106,53 @@ def byte_size(size: int) -> str:
 
 def short_hash(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()[:12]
+
+
+def triggering_buzz_content(message: str) -> str | None:
+    """Return only the human-authored Content field from the final Buzz event."""
+    event_start = message.rfind("[Buzz event:")
+    if event_start < 0:
+        return None
+    content_start = message.find("\nContent:", event_start)
+    if content_start < 0:
+        return None
+    content_start += len("\nContent:")
+    tail = message[content_start:]
+    endings = [index for marker in ("\nTags:", "\nParsed:") if (index := tail.find(marker)) >= 0]
+    content = tail[: min(endings) if endings else len(tail)].strip()
+    return redacted(content, MAX_VISIBLE_RESULT) if content else None
+
+
+def withheld_context_sources(message: str, prefix: str) -> list[dict[str, Any]]:
+    matches = list(CONTEXT_HEADER.finditer(message))
+    sources: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, match in enumerate(matches):
+        normalized = match.group(1).strip().casefold()
+        presentation = WITHHELD_CONTEXT.get(normalized)
+        if presentation is None and normalized.startswith("agent memory"):
+            presentation = WITHHELD_CONTEXT["agent memory — core"]
+        if presentation is None or normalized in seen:
+            continue
+        seen.add(normalized)
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(message)
+        raw = message[match.start():end].encode("utf-8")
+        kind, label, reason = presentation
+        sources.append(
+            {
+                "id": f"{prefix}-context-{len(sources)}",
+                "kind": kind,
+                "label": label,
+                "detail": "This context section was supplied to the runtime; select it to inspect its visibility boundary.",
+                "hash": short_hash(raw),
+                "size": byte_size(len(raw)),
+                "visibility": "provenance",
+                "content": None,
+                "fields": [],
+                "withheldReason": reason,
+            }
+        )
+    return sources
 
 
 def artifact_kind(path: str) -> str:
@@ -236,7 +313,7 @@ def build_page(config: dict[str, Any], channel_id: str) -> dict[str, Any]:
     if trigger is None:
         fail("no matching OpenCode turn for the selected channel")
 
-    message_id, session_id, started_ms, _, trigger_message_data = trigger
+    message_id, session_id, started_ms, _, _trigger_message_data = trigger
     session = connection.execute(
         """
         SELECT directory, model, time_updated, title, version
@@ -260,6 +337,13 @@ def build_page(config: dict[str, Any], channel_id: str) -> dict[str, Any]:
         (message_id,),
     ).fetchall()
     trigger_bytes = b"\n".join(str(row[0]).encode("utf-8") for row in trigger_parts)
+    trigger_texts = []
+    for row in trigger_parts:
+        part = load_json(row[0], {})
+        if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+            trigger_texts.append(part["text"])
+    trigger_text = "\n".join(trigger_texts)
+    visible_trigger = triggering_buzz_content(trigger_text)
     session_fingerprint = json.dumps(
         {"session": session_id, "directory": directory, "model": model, "version": version},
         sort_keys=True,
@@ -292,7 +376,7 @@ def build_page(config: dict[str, Any], channel_id: str) -> dict[str, Any]:
             "at": iso_time(started_ms),
             "kind": "lifecycle",
             "title": "Request received",
-            "detail": "Trigger content withheld; provenance fingerprint recorded.",
+            "detail": "Safe trigger context is available under Context; the surrounding runtime envelope remains withheld.",
             "status": "complete",
             "parameters": [],
             "result": None,
@@ -382,21 +466,38 @@ def build_page(config: dict[str, Any], channel_id: str) -> dict[str, Any]:
             "id": f"{message_id}-trigger",
             "kind": "thread",
             "label": "Triggering Buzz turn",
-            "detail": "The remote trigger was present; its content remains on Doha.",
+            "detail": "The human-authored Buzz request that started this runtime turn."
+            if visible_trigger
+            else "The remote trigger was present, but its human-authored content could not be isolated safely.",
             "hash": short_hash(trigger_bytes),
             "size": byte_size(len(trigger_bytes)),
-            "visibility": "provenance",
+            "visibility": "summary" if visible_trigger else "provenance",
+            "content": visible_trigger,
+            "fields": [],
+            "withheldReason": None
+            if visible_trigger
+            else "The exporter could not distinguish the human request from the surrounding runtime envelope, so it kept the body at source.",
         },
         {
             "id": f"{session_id}-runtime",
             "kind": "repository",
             "label": source_label,
-            "detail": "Session, workspace, model, and runtime metadata were supplied; raw instructions remain withheld.",
+            "detail": "Safe runtime metadata for the selected OpenCode session.",
             "hash": short_hash(session_fingerprint),
             "size": byte_size(len(session_fingerprint)),
-            "visibility": "provenance",
+            "visibility": "full",
+            "content": None,
+            "fields": [
+                {"label": "Workspace", "value": redacted(workspace_path.name or "remote-workspace", 240)},
+                {"label": "Model", "value": redacted(model_label, 240)},
+                {"label": "Runtime version", "value": redacted(version or "Not exposed", 120)},
+                {"label": "Source", "value": source_label},
+            ],
+            "withheldReason": None,
         },
     ]
+    context.extend(withheld_context_sources(trigger_text, message_id))
+    context = context[:MAX_CONTEXT_SOURCES]
     evidence = [
         {
             "stage": "local",

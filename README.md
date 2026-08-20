@@ -30,13 +30,20 @@ Run the complete repository verification with `corepack pnpm check`.
 The native app reads the selected local Codex rollout and the configured remote
 MOS agent sessions. Each source reduces its current turn into lifecycle,
 tool, file-change, provenance, and artifact events before raw runtime data can
-reach the Tauri webview.
-Raw prompts, private model reasoning, encrypted content, token counts, and rate
-limits are discarded. The local owner view retains the same UI-visible thinking
+reach the Tauri webview. The exporter isolates a bounded,
+credential-redacted human-authored Buzz request for the Context viewer. The
+surrounding raw prompt envelope, private model reasoning, encrypted content,
+token counts, and rate limits are discarded. The local owner view retains the
+same UI-visible thinking
 summaries, tool parameters, and tool results available in Buzz's local activity
 feed, with credential-pattern redaction and length limits. When the independent
 device identity is also authorized, ordinary signed Buzz messages are attached
 as delivery evidence through the existing read-only `/query` interface.
+
+Context cards are interactive. They show the isolated request, safe runtime
+fields, source integrity metadata, and explicit reasons for any body withheld at
+source. Base/system instructions, durable memory, canvas bodies, and the full
+thread envelope are fingerprinted but not copied into the companion.
 
 If no matching local runtime is active, the app falls back to the signed public
 message view; if neither source is available, it uses clearly labeled fixture

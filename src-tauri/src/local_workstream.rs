@@ -19,6 +19,7 @@ const MAX_SESSION_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_TAIL_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_CANDIDATE_FILES: usize = 64;
 const MAX_ACTIVITY_EVENTS: usize = 200;
+const MAX_CONTEXT_SOURCES: usize = 16;
 const MAX_VISIBLE_TEXT: usize = 1_200;
 const MAX_VISIBLE_RESULT: usize = 4_000;
 
@@ -52,6 +53,19 @@ pub struct RuntimeContextSource {
     pub hash: String,
     pub size: String,
     pub visibility: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<RuntimeContextField>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub withheld_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeContextField {
+    pub label: String,
+    pub value: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -220,6 +234,91 @@ pub(crate) fn redact_visible(value: &str) -> String {
 
 pub(crate) fn redact_result(value: &str) -> String {
     redact_with_limit(value, MAX_VISIBLE_RESULT)
+}
+
+fn triggering_buzz_content(message: &str) -> Option<String> {
+    let event_start = message.rfind("[Buzz event:")?;
+    let content_marker = "\nContent:";
+    let content_start =
+        message[event_start..].find(content_marker)? + event_start + content_marker.len();
+    let tail = &message[content_start..];
+    let content_end = ["\nTags:", "\nParsed:"]
+        .into_iter()
+        .filter_map(|marker| tail.find(marker))
+        .min()
+        .unwrap_or(tail.len());
+    let content = tail[..content_end].trim();
+    (!content.is_empty()).then(|| redact_result(content))
+}
+
+fn withheld_context_sources(message: &str, prefix: &str) -> Vec<RuntimeContextSource> {
+    let header = Regex::new(r"(?m)^\[([^\]\r\n]{1,96})\]\r?$").expect("valid context header regex");
+    let matches = header
+        .captures_iter(message)
+        .filter_map(|capture| {
+            Some((
+                capture.get(0)?.start(),
+                capture.get(1)?.as_str().trim().to_ascii_lowercase(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    let mut sources = Vec::new();
+    let mut seen = Vec::new();
+    for (index, (start, name)) in matches.iter().enumerate() {
+        let presentation = match name.as_str() {
+            "base" => Some((
+                "base",
+                "Base instructions",
+                "Raw platform instructions stay at the runtime source because they can contain security policy and internal control text.",
+            )),
+            "system" => Some((
+                "team",
+                "System and team instructions",
+                "Raw system and team instructions stay at the runtime source because they can contain operational policy and private workspace guidance.",
+            )),
+            value if value.starts_with("agent memory") => Some((
+                "memory",
+                "Agent memory",
+                "Raw durable memory stays at the runtime source because it can contain private operational history or credential-adjacent material.",
+            )),
+            "channel canvas" => Some((
+                "canvas",
+                "Channel canvas",
+                "The canvas body stays in Buzz; this record proves which injected revision shaped the turn without duplicating channel state.",
+            )),
+            "context" => Some((
+                "thread",
+                "Thread envelope",
+                "The full thread envelope stays at the runtime source. The human-authored triggering request is exposed separately when it can be isolated safely.",
+            )),
+            _ => None,
+        };
+        let Some((kind, label, reason)) = presentation else {
+            continue;
+        };
+        if seen.iter().any(|seen_name: &String| seen_name == name) {
+            continue;
+        }
+        seen.push(name.clone());
+        let end = matches
+            .get(index + 1)
+            .map(|(next_start, _)| *next_start)
+            .unwrap_or(message.len());
+        let raw = &message.as_bytes()[*start..end];
+        sources.push(RuntimeContextSource {
+            id: format!("{prefix}-context-{}", sources.len()),
+            kind: kind.into(),
+            label: label.into(),
+            detail: "This context section was supplied to the runtime; select it to inspect its visibility boundary.".into(),
+            hash: short_hash(raw),
+            size: byte_size(raw.len()),
+            visibility: "provenance".into(),
+            content: None,
+            fields: Vec::new(),
+            withheld_reason: Some(reason.into()),
+        });
+    }
+    sources
 }
 
 fn extracted_tool_names(input: &str) -> Vec<String> {
@@ -435,6 +534,7 @@ fn parse_workstream(
         let event_type = line.value.get("type").and_then(Value::as_str);
         match (event_type, payload_type(&line.value)) {
             (Some("turn_context"), _) => {
+                let mut fields = Vec::new();
                 if let Some(value) = line.value.get("payload") {
                     if let Some(value_model) = value.get("model").and_then(Value::as_str) {
                         model = redact_visible(value_model);
@@ -457,33 +557,80 @@ fn parse_workstream(
                                 .map(PathBuf::from),
                         );
                     }
+                    fields.push(RuntimeContextField {
+                        label: "Workspace".into(),
+                        value: workspace.clone(),
+                    });
+                    fields.push(RuntimeContextField {
+                        label: "Model".into(),
+                        value: model.clone(),
+                    });
+                    if let Some(policy) = value.get("approval_policy").and_then(Value::as_str) {
+                        fields.push(RuntimeContextField {
+                            label: "Approval policy".into(),
+                            value: redact_visible(policy),
+                        });
+                    }
+                    if let Some(policy) = value.get("sandbox_policy") {
+                        fields.push(RuntimeContextField {
+                            label: "Sandbox policy".into(),
+                            value: redact_visible(&policy.to_string()),
+                        });
+                    }
                 }
                 context.push(RuntimeContextSource {
                     id: format!("{turn_id}-runtime-context"),
                     kind: "repository".into(),
                     label: "Runtime context".into(),
-                    detail: "Workspace, model, policy, and context metadata were supplied; raw instructions remain withheld.".into(),
+                    detail: "Safe runtime metadata for the selected local Codex session.".into(),
                     hash: short_hash(line.raw.as_bytes()),
                     size: byte_size(line.raw.len()),
-                    visibility: "provenance".into(),
+                    visibility: "full".into(),
+                    content: None,
+                    fields,
+                    withheld_reason: None,
                 });
             }
             (Some("event_msg"), Some("user_message")) => {
+                let message = line
+                    .value
+                    .get("payload")
+                    .and_then(|payload| payload.get("message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let visible_trigger = triggering_buzz_content(message);
+                let withheld_reason = visible_trigger.is_none().then(|| {
+                    "The exporter could not distinguish the human request from the surrounding runtime envelope, so it kept the body at source.".into()
+                });
                 context.push(RuntimeContextSource {
                     id: format!("{turn_id}-trigger"),
                     kind: "thread".into(),
                     label: "Triggering Buzz turn".into(),
-                    detail: "The triggering thread payload was present. Content is withheld by the exporter.".into(),
+                    detail: if visible_trigger.is_some() {
+                        "The human-authored Buzz request that started this runtime turn."
+                    } else {
+                        "The triggering payload was present, but its human-authored content could not be isolated safely."
+                    }
+                    .into(),
                     hash: short_hash(line.raw.as_bytes()),
                     size: byte_size(line.raw.len()),
-                    visibility: "provenance".into(),
+                    visibility: if visible_trigger.is_some() {
+                        "summary"
+                    } else {
+                        "provenance"
+                    }
+                    .into(),
+                    content: visible_trigger,
+                    fields: Vec::new(),
+                    withheld_reason,
                 });
+                context.extend(withheld_context_sources(message, &turn_id));
                 activity.push(RuntimeActivity {
                     id: format!("{turn_id}-request"),
                     at: timestamp(&line.value),
                     kind: "lifecycle".into(),
                     title: "Request received".into(),
-                    detail: "Trigger content withheld; provenance fingerprint recorded.".into(),
+                    detail: "Safe trigger context is available under Context; the surrounding runtime envelope remains withheld.".into(),
                     status: "complete".into(),
                     parameters: Vec::new(),
                     result: None,
@@ -690,6 +837,7 @@ fn parse_workstream(
     if activity.len() > MAX_ACTIVITY_EVENTS {
         activity.drain(1..activity.len() - MAX_ACTIVITY_EVENTS + 1);
     }
+    context.truncate(MAX_CONTEXT_SOURCES);
 
     Ok(RuntimeWorkstreamPage {
         channel_id: channel_id.to_string(),
@@ -771,7 +919,7 @@ mod tests {
             r#"{{"timestamp":"2026-08-19T05:30:00Z","type":"session_meta","payload":{{"session_id":"session-1"}}}}
 {{"timestamp":"2026-08-19T05:31:00Z","type":"event_msg","payload":{{"type":"task_started","turn_id":"turn-1","started_at":"2026-08-19T05:31:00Z"}}}}
 {{"timestamp":"2026-08-19T05:31:00Z","type":"turn_context","payload":{{"turn_id":"turn-1","cwd":"/workspace/project","workspace_roots":["/workspace"],"model":"gpt-test","summary":"private"}}}}
-{{"timestamp":"2026-08-19T05:31:01Z","type":"event_msg","payload":{{"type":"user_message","message":"channel {CHANNEL} agent {AGENT} secret=nsec1notallowed"}}}}
+{{"timestamp":"2026-08-19T05:31:01Z","type":"event_msg","payload":{{"type":"user_message","message":"[Base]\nprivate base instructions\n[Agent Memory — core]\ntoken=private-memory\n[Context]\nchannel {CHANNEL} agent {AGENT}\n[Buzz event: @mention]\nContent: Show context safely; api_key=private-request\nTags: []\nParsed: mentions=[]"}}}}
 {{"timestamp":"2026-08-19T05:31:02Z","type":"event_msg","payload":{{"type":"agent_reasoning","text":"**Planning test run**"}}}}
 {{"timestamp":"2026-08-19T05:31:02Z","type":"response_item","payload":{{"type":"reasoning","summary":["private chain of thought"],"encrypted_content":"encrypted private reasoning"}}}}
 {{"timestamp":"2026-08-19T05:31:02Z","type":"response_item","payload":{{"type":"custom_tool_call","call_id":"call-1","name":"exec","input":"await tools.exec_command({{cmd:\"echo secret=supersecret\"}}); await tools.apply_patch(\"secret\")"}}}}
@@ -803,9 +951,34 @@ mod tests {
             .iter()
             .any(|event| event.title == "Files changed"));
         assert_eq!(page.artifacts[0].detail, "src/App.tsx");
-        assert_eq!(page.context.len(), 2);
+        assert_eq!(page.context.len(), 5);
+        let trigger = page
+            .context
+            .iter()
+            .find(|source| source.label == "Triggering Buzz turn")
+            .expect("trigger context");
+        assert_eq!(
+            trigger.content.as_deref(),
+            Some("Show context safely; api_key=[redacted]")
+        );
+        let runtime = page
+            .context
+            .iter()
+            .find(|source| source.kind == "repository")
+            .expect("runtime context");
+        assert!(runtime.fields.iter().any(|field| field.label == "Model"));
+        let memory = page
+            .context
+            .iter()
+            .find(|source| source.kind == "memory")
+            .expect("memory context");
+        assert!(memory.content.is_none());
+        assert!(memory.withheld_reason.is_some());
         assert!(!encoded.contains("private chain of thought"));
         assert!(!encoded.contains("encrypted private reasoning"));
+        assert!(!encoded.contains("private base instructions"));
+        assert!(!encoded.contains("private-memory"));
+        assert!(!encoded.contains("private-request"));
         assert!(!encoded.contains("nsec1notallowed"));
         assert!(!encoded.contains("do-not-show"));
         assert!(encoded.contains("token=[redacted]"));

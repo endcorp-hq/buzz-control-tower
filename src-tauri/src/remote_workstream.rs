@@ -18,6 +18,8 @@ const DOHA_HOST: &str = "control-tower@mos-agent.tailc8418d.ts.net";
 const EXPORT_COMMAND: &str = "/usr/local/bin/control-tower-fleet-export";
 const MOS_CHANNEL_ID: &str = "1da2b83b-c1e5-44b3-8a1c-546bf665933e";
 const MAX_REMOTE_DOCUMENT: usize = 10 * 1024 * 1024;
+const MAX_CONTEXT_FIELDS: usize = 12;
+const MAX_CONTEXT_CONTENT: usize = 4_001;
 
 const MOS_SOURCES: [(&str, &str, &str); 6] = [
     (
@@ -95,6 +97,12 @@ fn redact_page(page: &mut RuntimeWorkstreamPage) {
     for source in &mut page.context {
         source.label = redact_visible(&source.label);
         source.detail = redact_visible(&source.detail);
+        source.content = source.content.as_deref().map(redact_result);
+        for field in &mut source.fields {
+            field.label = redact_visible(&field.label);
+            field.value = redact_result(&field.value);
+        }
+        source.withheld_reason = source.withheld_reason.as_deref().map(redact_visible);
     }
     for item in &mut page.evidence {
         item.label = redact_visible(&item.label);
@@ -130,6 +138,15 @@ fn parse_document(bytes: &[u8]) -> Result<RemoteFleetDocument, String> {
         }
         if page.activity.len() > 200 || page.context.len() > 16 || page.artifacts.len() > 100 {
             return Err("Fleet exporter exceeded the bounded workstream schema".into());
+        }
+        if page.context.iter().any(|source| {
+            source.fields.len() > MAX_CONTEXT_FIELDS
+                || source
+                    .content
+                    .as_ref()
+                    .is_some_and(|content| content.chars().count() > MAX_CONTEXT_CONTENT)
+        }) {
+            return Err("Fleet exporter exceeded the bounded context schema".into());
         }
         redact_page(page);
     }
@@ -239,7 +256,18 @@ mod tests {
                 "parameters": [{"label": "Command", "value": "password=secret-value"}],
                 "result": "nsec1abcdefghijklmnop"
             }],
-            "context": [],
+            "context": [{
+                "id": "context",
+                "kind": "thread",
+                "label": "Trigger",
+                "detail": "Safe request",
+                "hash": "abcdef123456",
+                "size": "20 B",
+                "visibility": "summary",
+                "content": "api_key=secret-value",
+                "fields": [{"label": "Token", "value": "token=secret-value"}],
+                "withheldReason": "private_key=secret-value"
+            }],
             "evidence": [],
             "artifacts": []
         })
@@ -264,6 +292,10 @@ mod tests {
         let serialized = serde_json::to_string(&document).expect("serialize");
         assert!(!serialized.contains("secret-value"));
         assert!(!serialized.contains("nsec1abcdefghijklmnop"));
+        assert_eq!(
+            document.pages[0].context[0].content.as_deref(),
+            Some("api_key=[redacted]")
+        );
         assert_eq!(document.pages.len(), 1);
         assert_eq!(document.errors.len(), 5);
     }

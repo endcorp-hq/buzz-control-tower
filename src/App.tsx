@@ -396,23 +396,78 @@ function LiveView({ events, agent }: { events: ActivityEvent[]; agent: AgentTurn
   );
 }
 
-function ContextView({ sources }: { sources: ContextSource[] }) {
+export function ContextView({ sources }: { sources: ContextSource[] }) {
+  const [selectedSourceId, setSelectedSourceId] = useState<string>();
+  const selectedSource = sources.find((source) => source.id === selectedSourceId);
+
+  useEffect(() => {
+    if (selectedSourceId && !sources.some((source) => source.id === selectedSourceId)) {
+      setSelectedSourceId(undefined);
+    }
+  }, [selectedSourceId, sources]);
+
   return (
     <>
-      <PanelHeading eyebrow="Provenance manifest" title="Supplied context" description="The source, version, and visibility of each context section supplied to the agent." />
+      <PanelHeading eyebrow="Inspectable manifest" title="Supplied context" description="Select a source to inspect the safe content that shaped this turn, or see why its body remains withheld." />
       {sources.length ? (
-        <div className="card-grid context-grid">
-          {sources.map((source) => (
-            <article className="info-card" key={source.id}>
-              <div className="card-icon"><Layers3 size={17} /></div>
-              <div className="card-main"><span className="card-kicker">{source.kind}</span><h3>{source.label}</h3><p>{source.detail}</p></div>
-              <dl><div><dt>Hash</dt><dd>{source.hash}</dd></div><div><dt>Size</dt><dd>{source.size}</dd></div></dl>
-              <span className={`visibility visibility-${source.visibility}`}>{source.visibility}</span>
-            </article>
-          ))}
+        <div className={`context-layout${selectedSource ? " context-open" : ""}`}>
+          <div className="card-grid context-grid">
+            {sources.map((source) => {
+              const selected = source.id === selectedSourceId;
+              return (
+                <button
+                  type="button"
+                  className={`info-card context-card${selected ? " selected" : ""}`}
+                  key={source.id}
+                  aria-expanded={selected}
+                  aria-controls="context-detail"
+                  onClick={() => setSelectedSourceId(selected ? undefined : source.id)}
+                >
+                  <div className="card-icon"><Layers3 size={17} /></div>
+                  <div className="card-main"><span className="card-kicker">{source.kind}</span><h3>{source.label}</h3><p>{source.detail}</p></div>
+                  <dl><div><dt>Hash</dt><dd>{source.hash}</dd></div><div><dt>Size</dt><dd>{source.size}</dd></div></dl>
+                  <span className={`visibility visibility-${source.visibility}`}>{source.visibility}</span>
+                  <span className="inspect-label">{selected ? "Close" : "Inspect"}<ChevronRight size={12} /></span>
+                </button>
+              );
+            })}
+          </div>
+          {selectedSource && (
+            <aside className="context-detail" id="context-detail" aria-labelledby="context-detail-title">
+              <div className="context-detail-heading">
+                <div>
+                  <span className="eyebrow">{selectedSource.kind} context</span>
+                  <h3 id="context-detail-title">{selectedSource.label}</h3>
+                </div>
+                <button type="button" aria-label="Close context detail" onClick={() => setSelectedSourceId(undefined)}><X size={16} /></button>
+              </div>
+              <p className="context-summary">{selectedSource.detail}</p>
+              {(selectedSource.fields?.length ?? 0) > 0 && (
+                <dl className="context-fields">
+                  {selectedSource.fields?.map((field) => (
+                    <div key={`${selectedSource.id}-${field.label}`}><dt>{field.label}</dt><dd>{field.value}</dd></div>
+                  ))}
+                </dl>
+              )}
+              {selectedSource.content && (
+                <div className="context-content">
+                  <span>Safe content</span>
+                  <pre>{selectedSource.content}</pre>
+                </div>
+              )}
+              {selectedSource.withheldReason && (
+                <div className="withheld-note"><LockKeyhole size={15} /><div><strong>Body withheld at source</strong><p>{selectedSource.withheldReason}</p></div></div>
+              )}
+              <dl className="context-integrity">
+                <div><dt>Source hash</dt><dd>{selectedSource.hash}</dd></div>
+                <div><dt>Source size</dt><dd>{selectedSource.size}</dd></div>
+                <div><dt>Visibility</dt><dd>{selectedSource.visibility}</dd></div>
+              </dl>
+            </aside>
+          )}
         </div>
       ) : (
-        <EmptyState icon={Braces} title="No context manifest" text="This fixture does not include context provenance for the selected turn." />
+        <EmptyState icon={Braces} title="No context manifest" text="This turn source did not provide inspectable context provenance." />
       )}
     </>
   );
