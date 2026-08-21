@@ -24,6 +24,29 @@ at launch and on every five-second refresh, so a registered addition, removal,
 rename, or identity replacement no longer requires a desktop rebuild. A source
 failure becomes an unavailable agent card; it cannot erase healthy pages.
 
+### Identity rotations
+
+The collector registry is discovery for Tower clients; it is not unrestricted
+Buzz-agent discovery. Every live source also has a host-local exporter config
+that independently fixes the same name, public key, source label, database,
+and channel. This two-sided match prevents a registry edit from silently
+redirecting observation to another runtime.
+
+For a rename or public-key replacement, rotate both safety anchors as one
+operation:
+
+1. Install the new identity in the source host's root-owned exporter config.
+2. Invoke that exporter with the new fixed channel, public key, and name; require
+   a successful page whose identity and source label match exactly.
+3. Install the matching source entry and fixed command in the Doha registry.
+4. Poll the complete forced collector repeatedly and require the new identity
+   in `pages`, not `errors`.
+5. Confirm Tower shows the new agent after its five-second reconciliation.
+
+Updating only Doha makes the host reject the request as an identity mismatch;
+updating only the host leaves Tower querying the old registry identity. No
+desktop rebuild or agent-service restart is needed for a config-only rotation.
+
 ## Desktop transport
 
 The Tauri native layer executes only:
