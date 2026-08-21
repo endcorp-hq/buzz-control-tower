@@ -56,8 +56,22 @@ second time in native Rust before React receives it.
 - Withheld context represented by a short SHA-256 fingerprint, byte size, and
   explicit reason; isolated human requests and safe runtime fields remain
   inspectable
-- Remote exporter allowlist fixed to one agent identity and approved channel
+- Root-owned remote collector registry bounded to the approved MOS channel
 - Fixed remote command surface; the webview cannot choose a host or command
+
+## Workspace profiles direction
+
+The current release is one compiled workspace: `buzz.nilor.cool`, the
+`buzz-control-tower` and `mos-boston` channels, and one fixed Doha fleet
+collector. Changing Buzz Desktop's selected relay does not change Control
+Tower's source.
+
+The next connection milestone is explicit workspace profiles. Each profile
+will bind a visible name, relay URL, authorized channels and authors, and one
+or more fixed runtime collectors. One installation can then switch between
+profiles—and later combine authorized profiles—while preserving separate
+relay/channel authorization. The active workspace and relay must always be
+visible; Tower must never silently infer a relay switch from Buzz Desktop.
 
 No long-lived private key belongs in application configuration, logs, or web
 storage.

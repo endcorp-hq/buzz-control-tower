@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  fleetRosterPubkeys,
   relaySnapshot,
   runtimePagesSnapshot,
   runtimeSnapshot,
@@ -39,6 +40,18 @@ describe("companion relay snapshot", () => {
 });
 
 describe("companion runtime snapshot", () => {
+  it("derives relay delivery authors from the collector roster", () => {
+    expect(fleetRosterPubkeys({
+      pages: [{ agentPubkey: "1".repeat(64) } as RuntimeWorkstreamPage],
+      errors: [{
+        agentPubkey: "2".repeat(64),
+        agentName: "new-agent",
+        sourceLabel: "New host",
+        detail: "Starting up",
+      }],
+    })).toEqual(["1".repeat(64), "2".repeat(64)]);
+  });
+
   it("prioritizes a real redacted runtime and attaches signed delivery evidence", () => {
     const runtime: RuntimeWorkstreamPage = {
       channelId: "0b7c0958-3f7f-48c8-af3f-31e549b10e31",

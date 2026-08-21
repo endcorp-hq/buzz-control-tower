@@ -85,8 +85,8 @@
       ]
     },
     {
-      "agentPubkey": "21468ab6f07d19c38c3545f17f72a08e0d4bda4e1efe214e4177a860d8aa54a1",
-      "agentName": "museum-bridge-mos-agent",
+      "agentPubkey": "c67d290b48527af489a161598c51647e365c24d7dc63818c3094eb7e143118c8",
+      "agentName": "thor-mos-psc",
       "sourceLabel": "PSC · museum bridge",
       "command": [
         "/usr/bin/sudo",
@@ -104,9 +104,9 @@
         "--channel-id",
         "1da2b83b-c1e5-44b3-8a1c-546bf665933e",
         "--agent-pubkey",
-        "21468ab6f07d19c38c3545f17f72a08e0d4bda4e1efe214e4177a860d8aa54a1",
+        "c67d290b48527af489a161598c51647e365c24d7dc63818c3094eb7e143118c8",
         "--agent-name",
-        "museum-bridge-mos-agent"
+        "thor-mos-psc"
       ]
     }
   ]

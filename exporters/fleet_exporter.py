@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -60,6 +61,10 @@ def validate_source(source: Any) -> dict[str, Any]:
     for key in ("agentPubkey", "agentName", "sourceLabel"):
         if not isinstance(source.get(key), str) or not source[key]:
             fail(f"fleet source is missing {key}")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", source["agentPubkey"]):
+        fail("fleet source has an invalid public key")
+    if len(source["agentName"]) > 120 or len(source["sourceLabel"]) > 120:
+        fail("fleet source identity exceeds the size limit")
     command = source.get("command")
     disabled = source.get("disabledReason")
     if command is None and isinstance(disabled, str) and disabled:
@@ -109,6 +114,8 @@ def run_source(source: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str,
 
 def export_fleet(config: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     sources = [validate_source(source) for source in config["sources"]]
+    if len({source["agentPubkey"] for source in sources}) != len(sources):
+        fail("fleet configuration contains duplicate identities")
     pages: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=min(6, len(sources))) as executor:

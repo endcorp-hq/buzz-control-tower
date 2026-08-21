@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -56,6 +58,14 @@ class FleetExporterTest(unittest.TestCase):
 
         self.assertEqual(document["pages"], [])
         self.assertIn("identity", document["errors"][0]["detail"])
+
+    def test_rejects_duplicate_registry_identities(self):
+        first = self.source("alpha", disabledReason="Stopped.")
+        first.pop("command")
+        duplicate = {**first, "agentName": "alpha-renamed"}
+
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            exporter.export_fleet({"sources": [first, duplicate]})
 
 
 if __name__ == "__main__":

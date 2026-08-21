@@ -14,14 +14,6 @@ const CONTROL_TOWER_CHANNEL_ID = "0b7c0958-3f7f-48c8-af3f-31e549b10e31";
 const LUCAS_FIZZ_PUBKEY = "19215c80f8a71880f8c5738410d041e8afb2093bde1df8b4b691f23a50cb8b13";
 const MOS_BOSTON_CHANNEL_ID = "1da2b83b-c1e5-44b3-8a1c-546bf665933e";
 export const MOS_AGENT_PUBKEY = "e802d3594a2b31b22f35c6a42a17e1749d62decaceef5abe96841512607fdd00";
-const MOS_AGENT_PUBKEYS = [
-  MOS_AGENT_PUBKEY,
-  "f5171ae5d2877ab58ed3b38168728e32b31a956a64ba0159924ec4d21b77bd4f",
-  "9c16889d1df147e168507c362ea4c7532ddf3c4976e943f64eb070ae42d50405",
-  "963ba9398cb139ed5c7516924c3398e18699efbd9bb45d5eb03cfe43d25c6950",
-  "ec6bc8dc548a6e3f63c8ffe5cc93092b9fbfe7888c4d941e0804182109fa617b",
-  "21468ab6f07d19c38c3545f17f72a08e0d4bda4e1efe214e4177a860d8aa54a1",
-];
 
 export type RelayMessage = {
   id: string;
@@ -79,6 +71,13 @@ export type RemoteFleetDocument = {
   pages: RuntimeWorkstreamPage[];
   errors: RemoteSourceError[];
 };
+
+export function fleetRosterPubkeys(document: RemoteFleetDocument): string[] {
+  return [
+    ...document.pages.map((page) => page.agentPubkey),
+    ...document.errors.map((error) => error.agentPubkey),
+  ];
+}
 
 export interface TowerDataSource {
   loadSnapshot(): Promise<SnapshotLoadResult>;
@@ -332,7 +331,7 @@ class CompanionDataSource implements TowerDataSource {
     }
 
     const since = Math.floor(Date.now() / 1000) - 24 * 60 * 60;
-    const [localRuntime, remoteFleet, localRelay, remoteRelay] = await Promise.allSettled([
+    const [localRuntime, remoteFleet, localRelay] = await Promise.allSettled([
       invoke<RuntimeWorkstreamPage>("load_local_workstream", {
         channelId: CONTROL_TOWER_CHANNEL_ID,
         agentPubkey: LUCAS_FIZZ_PUBKEY,
@@ -346,19 +345,26 @@ class CompanionDataSource implements TowerDataSource {
         since,
         limit: 100,
       }),
-      invoke<RelayActivityPage>("load_channel_activity", {
-        relayUrl: RELAY_URL,
-        channelId: MOS_BOSTON_CHANNEL_ID,
-        authorPubkeys: MOS_AGENT_PUBKEYS,
-        since,
-        limit: 100,
-      }),
     ]);
 
     const localPage = localRuntime.status === "fulfilled" ? localRuntime.value : undefined;
     const remoteDocument = remoteFleet.status === "fulfilled" ? remoteFleet.value : undefined;
     const localRelayPage = localRelay.status === "fulfilled" ? localRelay.value : undefined;
-    const remoteRelayPage = remoteRelay.status === "fulfilled" ? remoteRelay.value : undefined;
+    let remoteRelayPage: RelayActivityPage | undefined;
+    let remoteRelayFailure: unknown;
+    if (remoteDocument) {
+      try {
+        remoteRelayPage = await invoke<RelayActivityPage>("load_channel_activity", {
+          relayUrl: RELAY_URL,
+          channelId: MOS_BOSTON_CHANNEL_ID,
+          authorPubkeys: fleetRosterPubkeys(remoteDocument),
+          since,
+          limit: 100,
+        });
+      } catch (error) {
+        remoteRelayFailure = error;
+      }
+    }
     const sources: RuntimeSource[] = [];
     for (const page of remoteDocument?.pages ?? []) {
       sources.push({ page, relayPage: remoteRelayPage, origin: "remote" });
@@ -394,6 +400,9 @@ class CompanionDataSource implements TowerDataSource {
     const failures = [remoteFleet, localRuntime, localRelay]
       .filter((result): result is PromiseRejectedResult => result.status === "rejected")
       .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason));
+    if (remoteRelayFailure) {
+      failures.push(remoteRelayFailure instanceof Error ? remoteRelayFailure.message : String(remoteRelayFailure));
+    }
     const message = failures[0] || "No companion data source is available.";
     const setupRequired = message.includes("authorization required")
       || message.includes("not authorized");

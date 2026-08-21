@@ -14,11 +14,14 @@ The live collector accounts for every configured source on every poll:
 | `lucas-mos-agent` | Doha `/home/lucas-agent` | live |
 | `dany-mos-agent` | Doha `/home/dany-agent` | live |
 | `Thor` | Thor `/home/thor-worker` | live through fixed nested SSH |
-| `museum-bridge-mos-agent` | museum `/home/museum-bridge-worker` | live through fixed nested SSH |
+| `thor-mos-psc` | museum `/home/museum-bridge-worker` | live through fixed nested SSH |
 | `vivid-bridge-mos-agent` | Windows/WSL continuity runtime | explicitly unavailable after Thor promotion |
 
-Each source has a root-owned configuration that fixes its database, exact
-agent name, full Nostr pubkey, source label, and allowed channel. A source
+Each source has a root-owned configuration that fixes its database, current
+agent name, full Nostr pubkey, source label, and allowed channel. The complete
+bounded source list is the authenticated runtime registry. Tower reconciles it
+at launch and on every five-second refresh, so a registered addition, removal,
+rename, or identity replacement no longer requires a desktop rebuild. A source
 failure becomes an unavailable agent card; it cannot erase healthy pages.
 
 ## Desktop transport
@@ -53,9 +56,11 @@ The Doha collector runs all six configured sources concurrently:
   record.
 
 Each child page is bounded to 2 MiB. The collector verifies the exact returned
-identity and source label. The Rust client verifies the entire six-source set,
-rejects duplicates/substitutions/omissions, reapplies redaction, and rejects
-schema bounds before anything reaches React.
+identity and source label against its root-owned registry. The Rust client
+accepts at most 16 sources, requires the fixed MOS channel, rejects invalid or
+duplicate identities, reapplies redaction, and rejects schema bounds before
+anything reaches React. Relay delivery queries use the reconciled registry
+pubkeys rather than a compiled desktop list.
 
 ## Exported semantics
 

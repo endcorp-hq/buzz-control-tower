@@ -50,7 +50,7 @@ user's standard known-hosts file.
 ## Acceptance test
 
 - `mos-agent`, `lucas-mos-agent`, `dany-mos-agent`, `Thor`, and
-  `museum-bridge-mos-agent` appear with real activity.
+  `thor-mos-psc` appear with real activity.
 - `vivid-bridge-mos-agent` appears as unavailable because the continuity runtime
   is intentionally stopped.
 - Expanding a tool row shows redacted parameters/results.

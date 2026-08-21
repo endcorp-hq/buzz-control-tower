@@ -2,7 +2,8 @@
 //!
 //! Authentication is delegated to the host operating system's existing
 //! Tailscale SSH session. The webview cannot select a host or remote command;
-//! it receives only a bounded document whose identities match this allowlist.
+//! it receives only a bounded document whose identities come from the
+//! root-owned collector registry.
 
 use std::collections::HashSet;
 use std::io::Read;
@@ -18,41 +19,9 @@ const DOHA_HOST: &str = "control-tower@mos-agent.tailc8418d.ts.net";
 const EXPORT_COMMAND: &str = "/usr/local/bin/control-tower-fleet-export";
 const MOS_CHANNEL_ID: &str = "1da2b83b-c1e5-44b3-8a1c-546bf665933e";
 const MAX_REMOTE_DOCUMENT: usize = 10 * 1024 * 1024;
+const MAX_FLEET_SOURCES: usize = 16;
 const MAX_CONTEXT_FIELDS: usize = 12;
 const MAX_CONTEXT_CONTENT: usize = 4_001;
-
-const MOS_SOURCES: [(&str, &str, &str); 6] = [
-    (
-        "e802d3594a2b31b22f35c6a42a17e1749d62decaceef5abe96841512607fdd00",
-        "mos-agent",
-        "Doha · mos-agent",
-    ),
-    (
-        "f5171ae5d2877ab58ed3b38168728e32b31a956a64ba0159924ec4d21b77bd4f",
-        "lucas-mos-agent",
-        "Doha · lucas-mos-agent",
-    ),
-    (
-        "9c16889d1df147e168507c362ea4c7532ddf3c4976e943f64eb070ae42d50405",
-        "dany-mos-agent",
-        "Doha · dany-mos-agent",
-    ),
-    (
-        "963ba9398cb139ed5c7516924c3398e18699efbd9bb45d5eb03cfe43d25c6950",
-        "vivid-bridge-mos-agent",
-        "Vivid studio · continuity bridge",
-    ),
-    (
-        "ec6bc8dc548a6e3f63c8ffe5cc93092b9fbfe7888c4d941e0804182109fa617b",
-        "Thor",
-        "Vivid studio · Thor",
-    ),
-    (
-        "21468ab6f07d19c38c3545f17f72a08e0d4bda4e1efe214e4177a860d8aa54a1",
-        "museum-bridge-mos-agent",
-        "PSC · museum bridge",
-    ),
-];
 
 #[cfg(target_os = "macos")]
 const SSH_PROGRAM: &str = "/usr/bin/ssh";
@@ -75,13 +44,17 @@ pub struct RemoteFleetDocument {
     pub errors: Vec<RemoteSourceError>,
 }
 
-fn configured_source(pubkey: &str, name: &str, label: &str) -> bool {
-    MOS_SOURCES
-        .iter()
-        .any(|source| source == &(pubkey, name, label))
+fn valid_roster_identity(pubkey: &str, name: &str, label: &str) -> bool {
+    pubkey.len() == 64
+        && pubkey.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && !name.trim().is_empty()
+        && name.chars().count() <= 120
+        && !label.trim().is_empty()
+        && label.chars().count() <= 120
 }
 
 fn redact_page(page: &mut RuntimeWorkstreamPage) {
+    page.agent_name = redact_visible(&page.agent_name);
     page.model = redact_visible(&page.model);
     page.workspace = redact_visible(&page.workspace);
     page.source_label = page.source_label.as_deref().map(redact_visible);
@@ -120,8 +93,9 @@ fn parse_document(bytes: &[u8]) -> Result<RemoteFleetDocument, String> {
     }
     let mut document: RemoteFleetDocument = serde_json::from_slice(bytes)
         .map_err(|_| "Fleet exporter returned an invalid workstream document".to_string())?;
-    if document.pages.len() + document.errors.len() != MOS_SOURCES.len() {
-        return Err("Fleet exporter did not account for every configured source".into());
+    let source_count = document.pages.len() + document.errors.len();
+    if !(1..=MAX_FLEET_SOURCES).contains(&source_count) {
+        return Err("Fleet exporter returned an invalid roster size".into());
     }
 
     let mut identities = HashSet::new();
@@ -131,10 +105,10 @@ fn parse_document(bytes: &[u8]) -> Result<RemoteFleetDocument, String> {
             .as_deref()
             .ok_or_else(|| "Fleet exporter omitted a source label".to_string())?;
         if page.channel_id != MOS_CHANNEL_ID
-            || !configured_source(&page.agent_pubkey, &page.agent_name, label)
+            || !valid_roster_identity(&page.agent_pubkey, &page.agent_name, label)
             || !identities.insert(page.agent_pubkey.clone())
         {
-            return Err("Fleet exporter identity does not match the configured source".into());
+            return Err("Fleet exporter returned an invalid or duplicate roster identity".into());
         }
         if page.activity.len() > 200 || page.context.len() > 16 || page.artifacts.len() > 100 {
             return Err("Fleet exporter exceeded the bounded workstream schema".into());
@@ -151,12 +125,10 @@ fn parse_document(bytes: &[u8]) -> Result<RemoteFleetDocument, String> {
         redact_page(page);
     }
     for error in &mut document.errors {
-        if !configured_source(&error.agent_pubkey, &error.agent_name, &error.source_label)
+        if !valid_roster_identity(&error.agent_pubkey, &error.agent_name, &error.source_label)
             || !identities.insert(error.agent_pubkey.clone())
         {
-            return Err(
-                "Fleet exporter error identity does not match the configured source".into(),
-            );
+            return Err("Fleet exporter returned an invalid or duplicate roster identity".into());
         }
         error.agent_name = redact_visible(&error.agent_name);
         error.source_label = redact_visible(&error.source_label);
@@ -233,12 +205,16 @@ pub fn load_mos_fleet_workstreams() -> Result<RemoteFleetDocument, String> {
 mod tests {
     use super::*;
 
-    fn page(source: (&str, &str, &str)) -> serde_json::Value {
+    fn source(index: usize, name: &str, label: &str) -> (String, String, String) {
+        (format!("{index:064x}"), name.into(), label.into())
+    }
+
+    fn page(source: &(String, String, String)) -> serde_json::Value {
         serde_json::json!({
             "channelId": MOS_CHANNEL_ID,
-            "agentPubkey": source.0,
-            "agentName": source.1,
-            "sourceLabel": source.2,
+            "agentPubkey": &source.0,
+            "agentName": &source.1,
+            "sourceLabel": &source.2,
             "sessionId": "session",
             "turnId": "turn",
             "status": "complete",
@@ -274,14 +250,16 @@ mod tests {
     }
 
     fn complete_document() -> Vec<u8> {
+        let active = source(1, "mos-agent", "Doha · mos-agent");
+        let unavailable = source(2, "thor-mos-psc", "PSC · museum bridge");
         serde_json::to_vec(&serde_json::json!({
-            "pages": [page(MOS_SOURCES[0])],
-            "errors": MOS_SOURCES[1..].iter().map(|source| serde_json::json!({
-                "agentPubkey": source.0,
-                "agentName": source.1,
-                "sourceLabel": source.2,
+            "pages": [page(&active)],
+            "errors": [serde_json::json!({
+                "agentPubkey": unavailable.0,
+                "agentName": unavailable.1,
+                "sourceLabel": unavailable.2,
                 "detail": "unavailable"
-            })).collect::<Vec<_>>()
+            })]
         }))
         .expect("document json")
     }
@@ -297,16 +275,47 @@ mod tests {
             Some("api_key=[redacted]")
         );
         assert_eq!(document.pages.len(), 1);
-        assert_eq!(document.errors.len(), 5);
+        assert_eq!(document.errors.len(), 1);
+        assert_eq!(document.errors[0].agent_name, "thor-mos-psc");
     }
 
     #[test]
-    fn rejects_unconfigured_or_missing_agent() {
+    fn accepts_a_changed_root_owned_roster_without_a_desktop_rebuild() {
+        let replacement = source(99, "new-bridge-agent", "New venue · bridge");
         let mut value: serde_json::Value =
             serde_json::from_slice(&complete_document()).expect("json");
-        value["errors"].as_array_mut().expect("errors").pop();
-        let error = parse_document(&serde_json::to_vec(&value).expect("json")).unwrap_err();
-        assert!(error.contains("every configured source"));
+        value["errors"][0]["agentPubkey"] = replacement.0.clone().into();
+        value["errors"][0]["agentName"] = replacement.1.clone().into();
+        value["errors"][0]["sourceLabel"] = replacement.2.clone().into();
+
+        let document = parse_document(&serde_json::to_vec(&value).expect("json")).expect("roster");
+        assert_eq!(document.errors[0].agent_pubkey, replacement.0);
+        assert_eq!(document.errors[0].agent_name, replacement.1);
+    }
+
+    #[test]
+    fn rejects_empty_duplicate_or_wrong_channel_rosters() {
+        let empty =
+            serde_json::to_vec(&serde_json::json!({"pages": [], "errors": []})).expect("json");
+        assert!(parse_document(&empty).unwrap_err().contains("roster size"));
+
+        let mut duplicate: serde_json::Value =
+            serde_json::from_slice(&complete_document()).expect("json");
+        duplicate["errors"][0]["agentPubkey"] = duplicate["pages"][0]["agentPubkey"].clone();
+        assert!(
+            parse_document(&serde_json::to_vec(&duplicate).expect("json"))
+                .unwrap_err()
+                .contains("duplicate")
+        );
+
+        let mut wrong_channel: serde_json::Value =
+            serde_json::from_slice(&complete_document()).expect("json");
+        wrong_channel["pages"][0]["channelId"] = "00000000-0000-0000-0000-000000000000".into();
+        assert!(
+            parse_document(&serde_json::to_vec(&wrong_channel).expect("json"))
+                .unwrap_err()
+                .contains("invalid")
+        );
     }
 
     #[test]
