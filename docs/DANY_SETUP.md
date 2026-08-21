@@ -1,7 +1,7 @@
 # Dany setup
 
-Dany can run Control Tower on `desktop-vfmf3b6` without joining the nilor
-tailnet or switching away from `dany@vividstudio.me`.
+Dany can build and run Control Tower 0.2.0 on `desktop-vfmf3b6` without
+joining the nilor tailnet or switching away from `dany@vividstudio.me`.
 
 ## Network state already prepared
 
@@ -15,45 +15,98 @@ tailnet or switching away from `dany@vividstudio.me`.
 Do not use a nilor auth key on Dany's Windows machine. An auth key would enroll
 or switch the machine into nilor; it is unnecessary for this shared-node path.
 
-## Native Windows build
+Before building, confirm that Tailscale is signed in as
+`dany@vividstudio.me`, then run this in PowerShell:
 
-Until signed Windows installers are published, build on the Windows host with:
+```powershell
+tailscale status
+tailscale ping mos-agent.tailc8418d.ts.net
+ssh control-tower@mos-agent.tailc8418d.ts.net /usr/local/bin/control-tower-fleet-export `
+  > "$env:TEMP\control-tower-fleet.json"
+(Get-Content -Raw "$env:TEMP\control-tower-fleet.json" | ConvertFrom-Json).pages.agentName
+```
 
-1. Node.js 20+, Corepack, Rust stable, Microsoft C++ Build Tools, WebView2, Git,
-   and Windows OpenSSH Client installed.
-2. Clone the Buzz `buzz-control-tower` repository and check out the reviewed
-   fleet commit.
-3. Run:
+The first SSH connection may ask Dany to confirm the host key or complete a
+Tailscale SSH browser check. It must not offer an interactive Linux shell.
 
-   ```powershell
-   corepack pnpm install --frozen-lockfile
-   corepack pnpm check
-   corepack pnpm tauri build
-   ```
+## Native Windows build and run
 
-4. Install the generated Windows bundle from `src-tauri\target\release\bundle`.
+Install these prerequisites:
 
-The app invokes `ssh.exe` through `PATH`; it never asks for or stores a Tailscale
-credential. The first connection may record Doha's SSH host key in the Windows
-user's standard known-hosts file.
+- Node.js 20 or newer, with Corepack
+- Rust stable through `rustup`
+- Git for Windows
+- Microsoft C++ Build Tools with **Desktop development with C++**
+- Microsoft Edge WebView2 Runtime
+- Windows OpenSSH Client
+- Tailscale
+- Buzz Desktop, so authenticated access to the Buzz-hosted Git repository is
+  available
 
-## First launch
+Then use PowerShell:
+
+```powershell
+git clone https://buzz.nilor.cool/git/19215c80f8a71880f8c5738410d041e8afb2093bde1df8b4b691f23a50cb8b13/buzz-control-tower
+Set-Location buzz-control-tower
+git switch main
+git pull --ff-only
+
+corepack enable
+corepack pnpm install --frozen-lockfile
+corepack pnpm check
+corepack pnpm tauri dev
+```
+
+`tauri dev` is the quickest acceptance path. After testing, close the dev app
+and build an installable package:
+
+```powershell
+corepack pnpm tauri build
+```
+
+Install the generated `.msi` or setup `.exe` under
+`src-tauri\target\release\bundle`. The app invokes `ssh.exe` through `PATH`;
+it never asks for or stores a Tailscale credential, VM password, agent Buzz
+key, or personal Buzz key.
+
+## First launch and device authorization
 
 1. Windows may ask once for access to the OS credential vault used for the
    device-only Control Tower key.
-2. The MOS fleet timeline should load through the already-shared Doha node.
-3. If the badge says `Authorize device`, use **Copy device key** and send that
-   public key to the Buzz channel owner. Relay membership plus mos-boston channel
-   membership are required only for attaching signed Buzz delivery messages;
-   the SSH runtime workstreams do not contain a Buzz private key.
+2. The MOS runtime fleet should load through the already-shared Doha node even
+   before relay delivery evidence is authorized.
+3. If the badge says `Authorize device`, use **Copy device key** and post that
+   public key in `#buzz-control-tower`. The channel owner can admit that
+   device identity to the relay and relevant channels. The companion never
+   needs Dany's permanent Buzz private key.
+
+## How Dany's agents appear
+
+`dany-mos-agent` is already registered in the root-owned Doha fleet registry.
+Every Tower installation reconciles that complete bounded registry on launch
+and every five-second refresh, so Dany does not add the existing MOS agents one
+at a time on Windows.
+
+For another remote agent, post its display name, full public key, source
+machine, runtime home or database location, and Buzz channel. An operator must
+register one fixed exporter source in the collector; after that, all Tower
+clients discover additions, removals, renames, and identity replacements
+without an app rebuild. Never post an agent private key or provider credential.
+
+Control Tower 0.2.0 does not yet auto-discover arbitrary personal agents running
+locally on Dany's Windows machine. The current local adapter follows one
+compiled local target, while the MOS fleet comes from the authenticated Doha
+registry. Local multi-agent discovery belongs with the planned workspace and
+connection-profile work rather than being silently inferred from Buzz Desktop.
 
 ## Acceptance test
 
-- `mos-agent`, `lucas-mos-agent`, `dany-mos-agent`, `Thor`, and
-  `thor-mos-psc` appear with real activity.
-- `vivid-bridge-mos-agent` appears as unavailable because the continuity runtime
-  is intentionally stopped.
-- Expanding a tool row shows redacted parameters/results.
+- The roster includes `mos-agent`, `lucas-mos-agent`, `dany-mos-agent`, `Thor`,
+  `thor-mos-psc`, and `vivid-bridge-mos-agent`.
+- Healthy sources show real activity. Offline or retired sources remain visible
+  as unavailable instead of disappearing.
+- Expanding a tool row shows redacted parameters and results.
+- **Context** cards open an inspectable detail drawer.
 - Attempting any SSH command other than the fleet exporter is denied.
-- A new signed mos-boston delivery appears only after the companion device key
-  is admitted to Buzz and the channel.
+- A new signed MOS delivery appears only after the companion device key is
+  admitted to Buzz and the channel.
