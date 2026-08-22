@@ -2,6 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { fixtureSnapshot } from "./fixtures";
 import type {
   ActivityEvent,
+  AgentStatus,
   Artifact,
   ContextSource,
   Evidence,
@@ -155,6 +156,34 @@ export type RelayActivityPage = {
   messages: RelayMessage[];
 };
 
+export type TelemetryActivityEntry = {
+  at?: string | null;
+  kind?: string | null;
+  title?: string | null;
+  status?: string | null;
+};
+
+export type AgentTelemetry = {
+  pubkey: string;
+  eventCreatedAt: number;
+  status: "working" | "complete" | "error" | "idle";
+  model?: string | null;
+  sessionId?: string | null;
+  turnId?: string | null;
+  turnStartedAt?: string | null;
+  updatedAt?: string | null;
+  completedAt?: string | null;
+  stopReason?: string | null;
+  activity: TelemetryActivityEntry[];
+};
+
+export type RelayTelemetryPage = {
+  channelId: string;
+  statuses: AgentTelemetry[];
+};
+
+export type TelemetryPages = Map<string, RelayTelemetryPage>;
+
 export type RuntimeActivity = {
   id: string;
   at: string;
@@ -242,43 +271,136 @@ function activityFromMessage(message: RelayMessage): ActivityEvent {
   };
 }
 
+export type ChannelRosters = Map<string, ChannelRoster>;
+
+function groupMessagesByAuthor(page: RelayActivityPage | undefined): Map<string, RelayMessage[]> {
+  const byAuthor = new Map<string, RelayMessage[]>();
+  for (const message of page?.messages ?? []) {
+    const existing = byAuthor.get(message.pubkey);
+    if (existing) existing.push(message);
+    else byAuthor.set(message.pubkey, [message]);
+  }
+  return byAuthor;
+}
+
+// Map an agent-reported telemetry status onto the card status union.
+// "error" has no dedicated AgentStatus variant, so it renders as "blocked"
+// with an explicit "Turn error" label.
+const TELEMETRY_STATUS_CARD: Record<
+  AgentTelemetry["status"],
+  { status: AgentStatus; statusLabel: string }
+> = {
+  working: { status: "working", statusLabel: "Working" },
+  complete: { status: "complete", statusLabel: "Turn complete" },
+  error: { status: "blocked", statusLabel: "Turn error" },
+  idle: { status: "idle", statusLabel: "Idle" },
+};
+
+const MAX_TELEMETRY_ACTIVITY = 20;
+
+function activityEventKind(kind: string | null | undefined): ActivityEvent["kind"] {
+  return kind === "tool" || kind === "message" || kind === "evidence" || kind === "lifecycle"
+    ? kind
+    : "lifecycle";
+}
+
+function activityEventStatus(status: string | null | undefined): ActivityEvent["status"] {
+  return status === "running" || status === "complete" || status === "failed"
+    ? status
+    : undefined;
+}
+
+// Telemetry activity arrives newest-last; render it newest-first like the
+// runtime lanes do.
+function activityFromTelemetry(telemetry: AgentTelemetry): ActivityEvent[] {
+  return telemetry.activity
+    .slice(-MAX_TELEMETRY_ACTIVITY)
+    .map((entry, index): ActivityEvent => ({
+      id: `${telemetry.pubkey}-telemetry-${index}`,
+      at: entry.at ? clockTime(entry.at) : "—",
+      kind: activityEventKind(entry.kind),
+      title: entry.title || "Agent activity",
+      detail: "Reported by agent work-status telemetry.",
+      status: activityEventStatus(entry.status),
+    }))
+    .reverse();
+}
+
+// A relay-derived agent card. A member with no signed events in the window is
+// still rendered, as a quiet idle card, so the discovered roster never shrinks
+// to just the recent speakers. Agent-published work-status telemetry, when
+// present, enriches the card with live status, model, and activity.
+function relayAgentCard(
+  channelId: string,
+  pubkey: string,
+  messages: RelayMessage[],
+  presentation: WorkspacePresentation,
+  telemetry?: AgentTelemetry,
+) {
+  const newest = messages.at(-1);
+  const card = telemetry ? TELEMETRY_STATUS_CARD[telemetry.status] : undefined;
+  const telemetryActivity = telemetry ? activityFromTelemetry(telemetry) : [];
+  const newestTelemetry = telemetryActivity[0];
+  const elapsed = telemetry?.turnStartedAt
+    ? telemetry.status === "working"
+      ? elapsedTime(telemetry.turnStartedAt)
+      : telemetry.completedAt
+        ? elapsedTime(telemetry.turnStartedAt, telemetry.completedAt)
+        : "—"
+    : "—";
+  return {
+    id: `${channelId}-${pubkey}`,
+    pubkey,
+    agentName: authorName(presentation, pubkey),
+    role: presentation.authorRoles.get(pubkey) ?? "Channel participant",
+    status: (card?.status ?? "idle") as AgentStatus,
+    statusLabel: card?.statusLabel ?? (newest ? "Relay visible" : "Quiet"),
+    operation: newestTelemetry?.title
+      ?? (newest
+        ? "Showing signed public channel updates"
+        : "No signed channel events in the last 24 hours"),
+    elapsed,
+    lastActivity: telemetry?.updatedAt
+      ? new Date(telemetry.updatedAt).toLocaleTimeString()
+      : newest
+        ? new Date(newest.createdAt * 1000).toLocaleTimeString()
+        : "No recent events",
+    model: telemetry?.model ?? "Not exposed",
+    branch: "Not exposed",
+    head: "Not exposed",
+    helperCount: 0,
+    activity: [...telemetryActivity, ...[...messages].reverse().map(activityFromMessage)],
+    context: [],
+    evidence: [],
+    artifacts: [],
+  };
+}
+
+function channelTelemetry(
+  telemetryPages: TelemetryPages | undefined,
+  channelId: string,
+  pubkey: string,
+): AgentTelemetry | undefined {
+  return telemetryPages?.get(channelId)?.statuses.find((status) => status.pubkey === pubkey);
+}
+
 export function relayPagesSnapshot(
   pages: RelayActivityPage[],
   presentation: WorkspacePresentation = DEFAULT_PRESENTATION,
+  rosters?: ChannelRosters,
+  telemetryPages?: TelemetryPages,
 ): TowerSnapshot {
   const channels: TowerSnapshot["channels"] = [];
   for (const page of pages) {
     const meta = channelPresentation(presentation, page.channelId);
-    const byAuthor = new Map<string, RelayMessage[]>();
-    for (const message of page.messages) {
-      const existing = byAuthor.get(message.pubkey);
-      if (existing) existing.push(message);
-      else byAuthor.set(message.pubkey, [message]);
+    const byAuthor = groupMessagesByAuthor(page);
+    const pubkeys = [...byAuthor.keys()];
+    for (const pubkey of rosters?.get(page.channelId)?.authorPubkeys ?? []) {
+      if (!byAuthor.has(pubkey)) pubkeys.push(pubkey);
     }
-    const agents = [...byAuthor.entries()].map(([pubkey, messages]) => {
-      const newest = messages.at(-1);
-      return {
-        id: `${page.channelId}-${pubkey}`,
-        pubkey,
-        agentName: authorName(presentation, pubkey),
-        role: presentation.authorRoles.get(pubkey) ?? "Channel participant",
-        status: "idle" as const,
-        statusLabel: "Relay visible",
-        operation: "Showing signed public channel updates",
-        elapsed: "—",
-        lastActivity: newest
-          ? new Date(newest.createdAt * 1000).toLocaleTimeString()
-          : "No events",
-        model: "Not exposed",
-        branch: "Not exposed",
-        head: "Not exposed",
-        helperCount: 0,
-        activity: [...messages].reverse().map(activityFromMessage),
-        context: [],
-        evidence: [],
-        artifacts: [],
-      };
-    });
+    const agents = pubkeys.map((pubkey) =>
+      relayAgentCard(page.channelId, pubkey, byAuthor.get(pubkey) ?? [], presentation,
+        channelTelemetry(telemetryPages, page.channelId, pubkey)));
     channels.push({
       id: page.channelId,
       name: meta.name,
@@ -341,6 +463,9 @@ export function runtimePagesSnapshot(
   sources: RuntimeSource[],
   unavailable: RemoteSourceError[] = [],
   presentation: WorkspacePresentation = DEFAULT_PRESENTATION,
+  rosters?: ChannelRosters,
+  relayPages?: Map<string, RelayActivityPage>,
+  telemetryPages?: TelemetryPages,
 ): TowerSnapshot {
   const channels = new Map<string, TowerSnapshot["channels"][number]>();
   const ensureChannel = (channelId: string) => {
@@ -428,6 +553,27 @@ export function runtimePagesSnapshot(
       context: [],
       evidence: [],
       artifacts: [],
+    });
+  }
+
+  // Every discovered roster member without a runtime lane still gets a card,
+  // grouped under a per-channel roster workstream, so the full channel roster
+  // is visible even when only some agents have live collectors.
+  for (const [channelId, roster] of rosters ?? []) {
+    const channel = ensureChannel(channelId);
+    const covered = new Set(
+      channel.workstreams.flatMap((workstream) => workstream.agents.map((agent) => agent.pubkey)),
+    );
+    const quiet = roster.authorPubkeys.filter((pubkey) => !covered.has(pubkey));
+    if (quiet.length === 0) continue;
+    const byAuthor = groupMessagesByAuthor(relayPages?.get(channelId));
+    channel.workstreams.push({
+      id: `${channelId}-channel-roster`,
+      title: "Channel roster",
+      phase: "Relay-discovered",
+      agents: quiet.map((pubkey) =>
+        relayAgentCard(channelId, pubkey, byAuthor.get(pubkey) ?? [], presentation,
+          channelTelemetry(telemetryPages, channelId, pubkey))),
     });
   }
 
@@ -560,6 +706,8 @@ class CompanionDataSource implements TowerDataSource {
     const remoteDocument = remoteFleet.status === "fulfilled" ? remoteFleet.value : undefined;
 
     const relayPages = new Map<string, RelayActivityPage>();
+    const telemetryPages: TelemetryPages = new Map();
+    const rosters: ChannelRosters = new Map();
     const relayFailures: string[] = [];
     await Promise.all(profile.channels.map(async (channel) => {
       // Discover the live roster from signed relay events (cached briefly so
@@ -582,6 +730,7 @@ class CompanionDataSource implements TowerDataSource {
         }
       }
       const roster = mergeChannelRoster(channel, directory, remoteDocument);
+      rosters.set(channel.id, roster);
       for (const [pubkey, name] of roster.authorNames) {
         if (!presentation.authorNames.has(pubkey)) presentation.authorNames.set(pubkey, name);
       }
@@ -589,17 +738,39 @@ class CompanionDataSource implements TowerDataSource {
         presentation.authorRoles.set(pubkey, role);
       }
       if (roster.authorPubkeys.length === 0) return;
-      try {
-        const page = await invoke<RelayActivityPage>("load_channel_activity", {
+      // Fetch signed activity and agent work-status telemetry side by side.
+      // Telemetry is best-effort: its failure alone degrades silently to
+      // un-enriched cards; only a channel where both reads fail surfaces a
+      // failure note.
+      const [activity, telemetry] = await Promise.allSettled([
+        invoke<RelayActivityPage>("load_channel_activity", {
           relayUrl: profile.relayUrl,
           channelId: channel.id,
           authorPubkeys: roster.authorPubkeys,
           since,
           limit: 100,
-        });
-        relayPages.set(channel.id, page);
-      } catch (error) {
-        relayFailures.push(error instanceof Error ? error.message : String(error));
+        }),
+        invoke<RelayTelemetryPage>("load_channel_telemetry", {
+          relayUrl: profile.relayUrl,
+          channelId: channel.id,
+          authorPubkeys: roster.authorPubkeys,
+        }),
+      ]);
+      if (activity.status === "fulfilled") {
+        relayPages.set(channel.id, activity.value);
+      }
+      if (telemetry.status === "fulfilled") {
+        telemetryPages.set(channel.id, telemetry.value);
+      }
+      if (activity.status === "rejected") {
+        relayFailures.push(
+          activity.reason instanceof Error ? activity.reason.message : String(activity.reason));
+        if (telemetry.status === "rejected") {
+          const detail = telemetry.reason instanceof Error
+            ? telemetry.reason.message
+            : String(telemetry.reason);
+          relayFailures.push(`telemetry: ${detail}`);
+        }
       }
     }));
 
@@ -624,7 +795,8 @@ class CompanionDataSource implements TowerDataSource {
         ...collectorFailures,
       ];
       return {
-        snapshot: runtimePagesSnapshot(sources, remoteDocument?.errors, presentation),
+        snapshot: runtimePagesSnapshot(
+          sources, remoteDocument?.errors, presentation, rosters, relayPages, telemetryPages),
         connection: {
           state: "connected",
           label: hasRemote && hasLocal ? "Fleet + local" : hasRemote ? "Agent fleet" : "Local runtime",
@@ -635,7 +807,7 @@ class CompanionDataSource implements TowerDataSource {
 
     if (relayPages.size > 0) {
       return {
-        snapshot: relayPagesSnapshot([...relayPages.values()], presentation),
+        snapshot: relayPagesSnapshot([...relayPages.values()], presentation, rosters, telemetryPages),
         connection: {
           state: "connected",
           label: "Public relay",

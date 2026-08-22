@@ -4,11 +4,14 @@ import {
   fleetRosterPubkeys,
   mergeChannelRoster,
   presentationFromProfile,
+  relayPagesSnapshot,
   relaySnapshot,
   runtimePagesSnapshot,
   runtimeSnapshot,
+  type AgentTelemetry,
   type ChannelDirectory,
   type RelayActivityPage,
+  type RelayTelemetryPage,
   type RuntimeWorkstreamPage,
   type WorkspaceProfile,
 } from "./dataSource";
@@ -291,6 +294,84 @@ describe("companion runtime snapshot", () => {
     expect(roster.authorRoles.get("4".repeat(64))).toBe("Pinned author");
   });
 
+  it("renders quiet roster members as idle cards in the relay snapshot", () => {
+    const channelId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const page: RelayActivityPage = {
+      relayUrl: "wss://buzz.example.org",
+      channelId,
+      devicePubkey: "a".repeat(64),
+      messages: [{
+        id: "b".repeat(64),
+        pubkey: "4".repeat(64),
+        kind: 9,
+        createdAt: 1_800_000_000,
+        content: "Recent speaker",
+      }],
+    };
+    const rosters = new Map([[channelId, {
+      authorPubkeys: ["4".repeat(64), "6".repeat(64)],
+      authorNames: new Map([["6".repeat(64), "quiet-agent"]]),
+      authorRoles: new Map(),
+    }]]);
+
+    const snapshot = relayPagesSnapshot([page], undefined, rosters);
+    const agents = snapshot.channels[0].workstreams[0].agents;
+
+    expect(agents.map((agent) => agent.pubkey)).toEqual(["4".repeat(64), "6".repeat(64)]);
+    const quiet = agents[1];
+    expect(quiet.statusLabel).toBe("Quiet");
+    expect(quiet.operation).toContain("No signed channel events");
+    expect(quiet.activity).toEqual([]);
+  });
+
+  it("adds quiet roster members as a channel-roster workstream in the runtime snapshot", () => {
+    const channelId = "0b7c0958-3f7f-48c8-af3f-31e549b10e31";
+    const runtime: RuntimeWorkstreamPage = {
+      channelId,
+      agentPubkey: "1".repeat(64),
+      agentName: "live-agent",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      status: "working",
+      startedAt: "2027-01-15T08:00:00Z",
+      model: "gpt-test",
+      workspace: ".buzz",
+      activity: [],
+      context: [],
+      evidence: [],
+      artifacts: [],
+    };
+    const rosters = new Map([[channelId, {
+      authorPubkeys: ["1".repeat(64), "6".repeat(64)],
+      authorNames: new Map([["6".repeat(64), "quiet-agent"]]),
+      authorRoles: new Map(),
+    }]]);
+    const relayPages = new Map([[channelId, {
+      relayUrl: "wss://buzz.example.org",
+      channelId,
+      devicePubkey: "a".repeat(64),
+      messages: [{
+        id: "b".repeat(64),
+        pubkey: "6".repeat(64),
+        kind: 9,
+        createdAt: 1_800_000_000,
+        content: "Older public update",
+      }],
+    }]]);
+
+    const snapshot = runtimePagesSnapshot(
+      [{ page: runtime, origin: "local" }], [], undefined, rosters, relayPages);
+    const channel = snapshot.channels[0];
+    const rosterStream = channel.workstreams.find((workstream) => workstream.title === "Channel roster");
+
+    expect(rosterStream).toBeDefined();
+    expect(rosterStream?.agents.map((agent) => agent.pubkey)).toEqual(["6".repeat(64)]);
+    expect(rosterStream?.agents[0].statusLabel).toBe("Relay visible");
+    expect(rosterStream?.agents[0].activity[0].detail).toBe("Older public update");
+    expect(channel.workstreams.flatMap((w) => w.agents).filter(
+      (agent) => agent.pubkey === "1".repeat(64))).toHaveLength(1);
+  });
+
   it("labels discovered agents and humans in the relay snapshot", () => {
     const profile: WorkspaceProfile = {
       version: 1,
@@ -319,6 +400,193 @@ describe("companion runtime snapshot", () => {
     const agent = snapshot.channels[0].workstreams[0].agents[0];
     expect(agent.agentName).toBe("thor-mos-psc");
     expect(agent.role).toBe("Agent · channel roster");
+  });
+
+  it("enriches quiet roster cards with agent work-status telemetry", () => {
+    const channelId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const page: RelayActivityPage = {
+      relayUrl: "wss://buzz.example.org",
+      channelId,
+      devicePubkey: "a".repeat(64),
+      messages: [{
+        id: "b".repeat(64),
+        pubkey: "6".repeat(64),
+        kind: 9,
+        createdAt: 1_800_000_000,
+        content: "Older public update",
+      }],
+    };
+    const rosters = new Map([[channelId, {
+      authorPubkeys: ["6".repeat(64)],
+      authorNames: new Map([["6".repeat(64), "busy-agent"]]),
+      authorRoles: new Map(),
+    }]]);
+    const telemetry: AgentTelemetry = {
+      pubkey: "6".repeat(64),
+      eventCreatedAt: 1_800_000_010,
+      status: "working",
+      model: "opencode/gpt-5.6-sol",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnStartedAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:10Z",
+      activity: [
+        { at: "2026-01-01T00:00:05Z", kind: "tool", title: "Shell command", status: "complete" },
+        { at: "2026-01-01T00:00:08Z", kind: "message", title: "Streaming reply", status: "running" },
+      ],
+    };
+    const telemetryPages = new Map<string, RelayTelemetryPage>([[channelId, {
+      channelId,
+      statuses: [telemetry],
+    }]]);
+
+    const snapshot = relayPagesSnapshot([page], undefined, rosters, telemetryPages);
+    const agent = snapshot.channels[0].workstreams[0].agents[0];
+
+    expect(agent.status).toBe("working");
+    expect(agent.statusLabel).toBe("Working");
+    expect(agent.model).toBe("opencode/gpt-5.6-sol");
+    expect(agent.operation).toBe("Streaming reply");
+    expect(agent.elapsed).not.toBe("—");
+    // Telemetry activity (newest first) precedes the signed relay messages.
+    expect(agent.activity.map((event) => event.title)).toEqual([
+      "Streaming reply",
+      "Shell command",
+      "Channel update posted",
+    ]);
+    expect(agent.activity[0].status).toBe("running");
+    expect(agent.activity[0].kind).toBe("message");
+  });
+
+  it("maps complete and error telemetry onto the card status union", () => {
+    const channelId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const page: RelayActivityPage = {
+      relayUrl: "wss://buzz.example.org",
+      channelId,
+      devicePubkey: "a".repeat(64),
+      messages: [],
+    };
+    const rosters = new Map([[channelId, {
+      authorPubkeys: ["6".repeat(64), "7".repeat(64)],
+      authorNames: new Map<string, string>(),
+      authorRoles: new Map<string, string>(),
+    }]]);
+    const telemetryPages = new Map<string, RelayTelemetryPage>([[channelId, {
+      channelId,
+      statuses: [
+        {
+          pubkey: "6".repeat(64),
+          eventCreatedAt: 1_800_000_010,
+          status: "complete",
+          activity: [{ kind: "surprise-kind", title: "Wrap up", status: "unusual" }],
+        },
+        { pubkey: "7".repeat(64), eventCreatedAt: 1_800_000_011, status: "error", activity: [] },
+      ],
+    }]]);
+
+    const snapshot = relayPagesSnapshot([page], undefined, rosters, telemetryPages);
+    const [completeAgent, errorAgent] = snapshot.channels[0].workstreams[0].agents;
+
+    expect(completeAgent.status).toBe("complete");
+    expect(completeAgent.statusLabel).toBe("Turn complete");
+    // Unknown activity kind/status values degrade to safe card values.
+    expect(completeAgent.activity[0].kind).toBe("lifecycle");
+    expect(completeAgent.activity[0].status).toBeUndefined();
+    expect(errorAgent.status).toBe("blocked");
+    expect(errorAgent.statusLabel).toBe("Turn error");
+  });
+
+  it("keeps runtime lanes authoritative over telemetry for the same agent", () => {
+    const channelId = "0b7c0958-3f7f-48c8-af3f-31e549b10e31";
+    const runtime: RuntimeWorkstreamPage = {
+      channelId,
+      agentPubkey: "1".repeat(64),
+      agentName: "live-agent",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      status: "working",
+      startedAt: "2027-01-15T08:00:00Z",
+      model: "runtime-model",
+      workspace: ".buzz",
+      activity: [],
+      context: [],
+      evidence: [],
+      artifacts: [],
+    };
+    const rosters = new Map([[channelId, {
+      authorPubkeys: ["1".repeat(64), "6".repeat(64)],
+      authorNames: new Map<string, string>(),
+      authorRoles: new Map<string, string>(),
+    }]]);
+    const telemetryPages = new Map<string, RelayTelemetryPage>([[channelId, {
+      channelId,
+      statuses: [
+        {
+          pubkey: "1".repeat(64),
+          eventCreatedAt: 1_800_000_010,
+          status: "error",
+          model: "telemetry-model",
+          activity: [],
+        },
+        {
+          pubkey: "6".repeat(64),
+          eventCreatedAt: 1_800_000_011,
+          status: "working",
+          model: "quiet-agent-model",
+          activity: [],
+        },
+      ],
+    }]]);
+
+    const snapshot = runtimePagesSnapshot(
+      [{ page: runtime, origin: "local" }], [], undefined, rosters, undefined, telemetryPages);
+    const agents = snapshot.channels[0].workstreams.flatMap((workstream) => workstream.agents);
+    const runtimeCards = agents.filter((agent) => agent.pubkey === "1".repeat(64));
+    const quietCard = agents.find((agent) => agent.pubkey === "6".repeat(64));
+
+    // The SSH-collected runtime lane is not duplicated or overridden.
+    expect(runtimeCards).toHaveLength(1);
+    expect(runtimeCards[0].model).toBe("runtime-model");
+    expect(runtimeCards[0].status).toBe("working");
+    expect(runtimeCards[0].statusLabel).toBe("Working");
+    // The quiet roster member still gets telemetry enrichment.
+    expect(quietCard?.model).toBe("quiet-agent-model");
+    expect(quietCard?.status).toBe("working");
+  });
+
+  it("caps prepended telemetry activity at twenty entries", () => {
+    const channelId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const page: RelayActivityPage = {
+      relayUrl: "wss://buzz.example.org",
+      channelId,
+      devicePubkey: "a".repeat(64),
+      messages: [],
+    };
+    const rosters = new Map([[channelId, {
+      authorPubkeys: ["6".repeat(64)],
+      authorNames: new Map<string, string>(),
+      authorRoles: new Map<string, string>(),
+    }]]);
+    const telemetryPages = new Map<string, RelayTelemetryPage>([[channelId, {
+      channelId,
+      statuses: [{
+        pubkey: "6".repeat(64),
+        eventCreatedAt: 1_800_000_010,
+        status: "working",
+        activity: Array.from({ length: 25 }, (_, index) => ({
+          kind: "tool",
+          title: `step-${index}`,
+        })),
+      }],
+    }]]);
+
+    const snapshot = relayPagesSnapshot([page], undefined, rosters, telemetryPages);
+    const agent = snapshot.channels[0].workstreams[0].agents[0];
+
+    expect(agent.activity).toHaveLength(20);
+    // Newest-last input keeps the newest twenty, rendered newest first.
+    expect(agent.activity[0].title).toBe("step-24");
+    expect(agent.activity[19].title).toBe("step-5");
   });
 
   it("keeps configured but unavailable fleet agents visible", () => {
