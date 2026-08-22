@@ -4,6 +4,7 @@ import {
   fleetRosterPubkeys,
   mergeChannelRoster,
   presentationFromProfile,
+  relayPagesSnapshot,
   relaySnapshot,
   runtimePagesSnapshot,
   runtimeSnapshot,
@@ -289,6 +290,84 @@ describe("companion runtime snapshot", () => {
     const roster = mergeChannelRoster(channel, undefined, undefined);
     expect(roster.authorPubkeys).toEqual(["4".repeat(64)]);
     expect(roster.authorRoles.get("4".repeat(64))).toBe("Pinned author");
+  });
+
+  it("renders quiet roster members as idle cards in the relay snapshot", () => {
+    const channelId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const page: RelayActivityPage = {
+      relayUrl: "wss://buzz.example.org",
+      channelId,
+      devicePubkey: "a".repeat(64),
+      messages: [{
+        id: "b".repeat(64),
+        pubkey: "4".repeat(64),
+        kind: 9,
+        createdAt: 1_800_000_000,
+        content: "Recent speaker",
+      }],
+    };
+    const rosters = new Map([[channelId, {
+      authorPubkeys: ["4".repeat(64), "6".repeat(64)],
+      authorNames: new Map([["6".repeat(64), "quiet-agent"]]),
+      authorRoles: new Map(),
+    }]]);
+
+    const snapshot = relayPagesSnapshot([page], undefined, rosters);
+    const agents = snapshot.channels[0].workstreams[0].agents;
+
+    expect(agents.map((agent) => agent.pubkey)).toEqual(["4".repeat(64), "6".repeat(64)]);
+    const quiet = agents[1];
+    expect(quiet.statusLabel).toBe("Quiet");
+    expect(quiet.operation).toContain("No signed channel events");
+    expect(quiet.activity).toEqual([]);
+  });
+
+  it("adds quiet roster members as a channel-roster workstream in the runtime snapshot", () => {
+    const channelId = "0b7c0958-3f7f-48c8-af3f-31e549b10e31";
+    const runtime: RuntimeWorkstreamPage = {
+      channelId,
+      agentPubkey: "1".repeat(64),
+      agentName: "live-agent",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      status: "working",
+      startedAt: "2027-01-15T08:00:00Z",
+      model: "gpt-test",
+      workspace: ".buzz",
+      activity: [],
+      context: [],
+      evidence: [],
+      artifacts: [],
+    };
+    const rosters = new Map([[channelId, {
+      authorPubkeys: ["1".repeat(64), "6".repeat(64)],
+      authorNames: new Map([["6".repeat(64), "quiet-agent"]]),
+      authorRoles: new Map(),
+    }]]);
+    const relayPages = new Map([[channelId, {
+      relayUrl: "wss://buzz.example.org",
+      channelId,
+      devicePubkey: "a".repeat(64),
+      messages: [{
+        id: "b".repeat(64),
+        pubkey: "6".repeat(64),
+        kind: 9,
+        createdAt: 1_800_000_000,
+        content: "Older public update",
+      }],
+    }]]);
+
+    const snapshot = runtimePagesSnapshot(
+      [{ page: runtime, origin: "local" }], [], undefined, rosters, relayPages);
+    const channel = snapshot.channels[0];
+    const rosterStream = channel.workstreams.find((workstream) => workstream.title === "Channel roster");
+
+    expect(rosterStream).toBeDefined();
+    expect(rosterStream?.agents.map((agent) => agent.pubkey)).toEqual(["6".repeat(64)]);
+    expect(rosterStream?.agents[0].statusLabel).toBe("Relay visible");
+    expect(rosterStream?.agents[0].activity[0].detail).toBe("Older public update");
+    expect(channel.workstreams.flatMap((w) => w.agents).filter(
+      (agent) => agent.pubkey === "1".repeat(64))).toHaveLength(1);
   });
 
   it("labels discovered agents and humans in the relay snapshot", () => {

@@ -242,43 +242,68 @@ function activityFromMessage(message: RelayMessage): ActivityEvent {
   };
 }
 
+export type ChannelRosters = Map<string, ChannelRoster>;
+
+function groupMessagesByAuthor(page: RelayActivityPage | undefined): Map<string, RelayMessage[]> {
+  const byAuthor = new Map<string, RelayMessage[]>();
+  for (const message of page?.messages ?? []) {
+    const existing = byAuthor.get(message.pubkey);
+    if (existing) existing.push(message);
+    else byAuthor.set(message.pubkey, [message]);
+  }
+  return byAuthor;
+}
+
+// A relay-derived agent card. A member with no signed events in the window is
+// still rendered, as a quiet idle card, so the discovered roster never shrinks
+// to just the recent speakers.
+function relayAgentCard(
+  channelId: string,
+  pubkey: string,
+  messages: RelayMessage[],
+  presentation: WorkspacePresentation,
+) {
+  const newest = messages.at(-1);
+  return {
+    id: `${channelId}-${pubkey}`,
+    pubkey,
+    agentName: authorName(presentation, pubkey),
+    role: presentation.authorRoles.get(pubkey) ?? "Channel participant",
+    status: "idle" as const,
+    statusLabel: newest ? "Relay visible" : "Quiet",
+    operation: newest
+      ? "Showing signed public channel updates"
+      : "No signed channel events in the last 24 hours",
+    elapsed: "—",
+    lastActivity: newest
+      ? new Date(newest.createdAt * 1000).toLocaleTimeString()
+      : "No recent events",
+    model: "Not exposed",
+    branch: "Not exposed",
+    head: "Not exposed",
+    helperCount: 0,
+    activity: [...messages].reverse().map(activityFromMessage),
+    context: [],
+    evidence: [],
+    artifacts: [],
+  };
+}
+
 export function relayPagesSnapshot(
   pages: RelayActivityPage[],
   presentation: WorkspacePresentation = DEFAULT_PRESENTATION,
+  rosters?: ChannelRosters,
 ): TowerSnapshot {
   const channels: TowerSnapshot["channels"] = [];
   for (const page of pages) {
     const meta = channelPresentation(presentation, page.channelId);
-    const byAuthor = new Map<string, RelayMessage[]>();
-    for (const message of page.messages) {
-      const existing = byAuthor.get(message.pubkey);
-      if (existing) existing.push(message);
-      else byAuthor.set(message.pubkey, [message]);
+    const byAuthor = groupMessagesByAuthor(page);
+    const pubkeys = [...byAuthor.keys()];
+    for (const pubkey of rosters?.get(page.channelId)?.authorPubkeys ?? []) {
+      if (!byAuthor.has(pubkey)) pubkeys.push(pubkey);
     }
-    const agents = [...byAuthor.entries()].map(([pubkey, messages]) => {
-      const newest = messages.at(-1);
-      return {
-        id: `${page.channelId}-${pubkey}`,
-        pubkey,
-        agentName: authorName(presentation, pubkey),
-        role: presentation.authorRoles.get(pubkey) ?? "Channel participant",
-        status: "idle" as const,
-        statusLabel: "Relay visible",
-        operation: "Showing signed public channel updates",
-        elapsed: "—",
-        lastActivity: newest
-          ? new Date(newest.createdAt * 1000).toLocaleTimeString()
-          : "No events",
-        model: "Not exposed",
-        branch: "Not exposed",
-        head: "Not exposed",
-        helperCount: 0,
-        activity: [...messages].reverse().map(activityFromMessage),
-        context: [],
-        evidence: [],
-        artifacts: [],
-      };
-    });
+    const agents = pubkeys.map((pubkey) =>
+      relayAgentCard(page.channelId, pubkey, byAuthor.get(pubkey) ?? [], presentation));
     channels.push({
       id: page.channelId,
       name: meta.name,
@@ -341,6 +366,8 @@ export function runtimePagesSnapshot(
   sources: RuntimeSource[],
   unavailable: RemoteSourceError[] = [],
   presentation: WorkspacePresentation = DEFAULT_PRESENTATION,
+  rosters?: ChannelRosters,
+  relayPages?: Map<string, RelayActivityPage>,
 ): TowerSnapshot {
   const channels = new Map<string, TowerSnapshot["channels"][number]>();
   const ensureChannel = (channelId: string) => {
@@ -428,6 +455,26 @@ export function runtimePagesSnapshot(
       context: [],
       evidence: [],
       artifacts: [],
+    });
+  }
+
+  // Every discovered roster member without a runtime lane still gets a card,
+  // grouped under a per-channel roster workstream, so the full channel roster
+  // is visible even when only some agents have live collectors.
+  for (const [channelId, roster] of rosters ?? []) {
+    const channel = ensureChannel(channelId);
+    const covered = new Set(
+      channel.workstreams.flatMap((workstream) => workstream.agents.map((agent) => agent.pubkey)),
+    );
+    const quiet = roster.authorPubkeys.filter((pubkey) => !covered.has(pubkey));
+    if (quiet.length === 0) continue;
+    const byAuthor = groupMessagesByAuthor(relayPages?.get(channelId));
+    channel.workstreams.push({
+      id: `${channelId}-channel-roster`,
+      title: "Channel roster",
+      phase: "Relay-discovered",
+      agents: quiet.map((pubkey) =>
+        relayAgentCard(channelId, pubkey, byAuthor.get(pubkey) ?? [], presentation)),
     });
   }
 
@@ -560,6 +607,7 @@ class CompanionDataSource implements TowerDataSource {
     const remoteDocument = remoteFleet.status === "fulfilled" ? remoteFleet.value : undefined;
 
     const relayPages = new Map<string, RelayActivityPage>();
+    const rosters: ChannelRosters = new Map();
     const relayFailures: string[] = [];
     await Promise.all(profile.channels.map(async (channel) => {
       // Discover the live roster from signed relay events (cached briefly so
@@ -582,6 +630,7 @@ class CompanionDataSource implements TowerDataSource {
         }
       }
       const roster = mergeChannelRoster(channel, directory, remoteDocument);
+      rosters.set(channel.id, roster);
       for (const [pubkey, name] of roster.authorNames) {
         if (!presentation.authorNames.has(pubkey)) presentation.authorNames.set(pubkey, name);
       }
@@ -624,7 +673,7 @@ class CompanionDataSource implements TowerDataSource {
         ...collectorFailures,
       ];
       return {
-        snapshot: runtimePagesSnapshot(sources, remoteDocument?.errors, presentation),
+        snapshot: runtimePagesSnapshot(sources, remoteDocument?.errors, presentation, rosters, relayPages),
         connection: {
           state: "connected",
           label: hasRemote && hasLocal ? "Fleet + local" : hasRemote ? "Agent fleet" : "Local runtime",
@@ -635,7 +684,7 @@ class CompanionDataSource implements TowerDataSource {
 
     if (relayPages.size > 0) {
       return {
-        snapshot: relayPagesSnapshot([...relayPages.values()], presentation),
+        snapshot: relayPagesSnapshot([...relayPages.values()], presentation, rosters),
         connection: {
           state: "connected",
           label: "Public relay",
