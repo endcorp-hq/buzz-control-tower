@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::local_workstream::{redact_result, redact_visible, RuntimeWorkstreamPage};
-use crate::workspace_profile::{load_or_bootstrap, CollectorConfig};
+use crate::workspace_profile::{load_state, CollectorConfig};
 
 const MAX_REMOTE_DOCUMENT: usize = 10 * 1024 * 1024;
 const MAX_FLEET_SOURCES: usize = 16;
@@ -222,8 +222,11 @@ fn fetch_collector_bytes(collector: &CollectorConfig) -> Result<Vec<u8>, String>
 }
 
 pub fn load_fleet_workstreams() -> Result<RemoteFleetDocument, String> {
-    let workspace = load_or_bootstrap()?;
-    let collectors = &workspace.profile.collectors;
+    let workspace = load_state()?;
+    let Some(profile) = workspace.profile else {
+        return Err("no workspace profile is configured yet".into());
+    };
+    let collectors = &profile.collectors;
     if collectors.is_empty() {
         return Err("the workspace profile configures no fleet collectors".into());
     }

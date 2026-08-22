@@ -2,11 +2,13 @@
 //! collector, and local-runtime bindings.
 //!
 //! The profile is a user-owned JSON file edited by the deterministic `tower`
-//! CLI (`scripts/tower.mjs`) or any operator tooling. The webview never
-//! supplies these values; native code loads and validates the profile from
-//! disk and hands the webview a bounded, already-validated document. On first
-//! launch the current compiled workspace is written out as the initial
-//! profile, so existing installations keep working without any setup step.
+//! CLI (`scripts/tower.mjs`) or any operator tooling. Native code loads and
+//! validates the profile from disk and hands the webview a bounded,
+//! already-validated document. Nothing is compiled in and no workspace is
+//! joined automatically: with no profile on disk the app enters onboarding,
+//! and the only webview-reachable write is `create_initial_profile`, which
+//! refuses to run once a profile exists — retargeting an existing install
+//! stays an operator/CLI action.
 
 use std::fs;
 use std::path::PathBuf;
@@ -76,10 +78,10 @@ pub struct WorkspaceProfile {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WorkspaceDocument {
-    pub profile: WorkspaceProfile,
+pub struct WorkspaceState {
     pub path: String,
-    pub bootstrapped: bool,
+    /// `None` means no profile exists yet — the app shows onboarding.
+    pub profile: Option<WorkspaceProfile>,
 }
 
 fn is_hex_pubkey(value: &str) -> bool {
@@ -191,45 +193,6 @@ pub fn validate(profile: &WorkspaceProfile) -> Result<(), String> {
     Ok(())
 }
 
-pub fn default_profile() -> WorkspaceProfile {
-    WorkspaceProfile {
-        version: PROFILE_VERSION,
-        workspace: "nilor.cool".into(),
-        viewer_name: "Lucas".into(),
-        relay_url: "wss://buzz.nilor.cool".into(),
-        channels: vec![
-            ChannelConfig {
-                id: "0b7c0958-3f7f-48c8-af3f-31e549b10e31".into(),
-                name: "buzz-control-tower".into(),
-                description: "Product development for the Buzz observability companion".into(),
-                authors: vec![AuthorConfig {
-                    pubkey: "19215c80f8a71880f8c5738410d041e8afb2093bde1df8b4b691f23a50cb8b13"
-                        .into(),
-                    name: Some("Lucas-Fizz".into()),
-                }],
-            },
-            ChannelConfig {
-                id: "1da2b83b-c1e5-44b3-8a1c-546bf665933e".into(),
-                name: "mos-boston".into(),
-                description: "MOS Boston product development and deployment".into(),
-                authors: Vec::new(),
-            },
-        ],
-        collectors: vec![CollectorConfig {
-            label: "Doha MOS fleet".into(),
-            channel_id: "1da2b83b-c1e5-44b3-8a1c-546bf665933e".into(),
-            ssh_host: "control-tower@mos-agent.tailc8418d.ts.net".into(),
-            command: "/usr/local/bin/control-tower-fleet-export".into(),
-        }],
-        local_runtime: Some(LocalRuntimeConfig {
-            channel_id: "0b7c0958-3f7f-48c8-af3f-31e549b10e31".into(),
-            agent_pubkey: "19215c80f8a71880f8c5738410d041e8afb2093bde1df8b4b691f23a50cb8b13"
-                .into(),
-            agent_name: "Lucas-Fizz".into(),
-        }),
-    }
-}
-
 pub fn profile_path() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os("CONTROL_TOWER_WORKSPACE") {
         return Ok(PathBuf::from(path));
@@ -244,24 +207,13 @@ pub fn profile_path() -> Result<PathBuf, String> {
         .join("workspace.json"))
 }
 
-pub fn load_or_bootstrap() -> Result<WorkspaceDocument, String> {
+pub fn load_state() -> Result<WorkspaceState, String> {
     let path = profile_path()?;
     let display_path = path.to_string_lossy().into_owned();
     if !path.exists() {
-        let profile = default_profile();
-        validate(&profile)?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("cannot create the workspace profile directory: {error}"))?;
-        }
-        let body = serde_json::to_string_pretty(&profile)
-            .map_err(|error| format!("cannot encode the default workspace profile: {error}"))?;
-        fs::write(&path, body + "\n")
-            .map_err(|error| format!("cannot write the workspace profile: {error}"))?;
-        return Ok(WorkspaceDocument {
-            profile,
+        return Ok(WorkspaceState {
             path: display_path,
-            bootstrapped: true,
+            profile: None,
         });
     }
 
@@ -280,10 +232,53 @@ pub fn load_or_bootstrap() -> Result<WorkspaceDocument, String> {
     validate(&profile).map_err(|error| {
         format!("workspace profile at {display_path} is not valid: {error}")
     })?;
-    Ok(WorkspaceDocument {
-        profile,
+    Ok(WorkspaceState {
         path: display_path,
-        bootstrapped: false,
+        profile: Some(profile),
+    })
+}
+
+/// First-run onboarding write: create the initial workspace profile for one
+/// relay and one channel. Refuses to touch an existing profile, so this is
+/// only reachable while the app is in the onboarding state — later changes
+/// go through the `tower` CLI.
+pub fn create_initial_profile(
+    relay_url: &str,
+    workspace: &str,
+    viewer_name: &str,
+    channel: ChannelConfig,
+) -> Result<WorkspaceState, String> {
+    let path = profile_path()?;
+    let display_path = path.to_string_lossy().into_owned();
+    if path.exists() {
+        return Err(format!(
+            "a workspace profile already exists at {display_path}; edit it with the tower CLI"
+        ));
+    }
+    let profile = WorkspaceProfile {
+        version: PROFILE_VERSION,
+        workspace: workspace.trim().to_string(),
+        viewer_name: viewer_name.trim().to_string(),
+        relay_url: relay_url.trim().to_string(),
+        channels: vec![channel],
+        collectors: Vec::new(),
+        local_runtime: None,
+    };
+    validate(&profile)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create the workspace profile directory: {error}"))?;
+    }
+    let body = serde_json::to_string_pretty(&profile)
+        .map_err(|error| format!("cannot encode the workspace profile: {error}"))?;
+    let temp = path.with_extension("json.tmp");
+    fs::write(&temp, body + "\n")
+        .map_err(|error| format!("cannot write the workspace profile: {error}"))?;
+    fs::rename(&temp, &path)
+        .map_err(|error| format!("cannot finalize the workspace profile: {error}"))?;
+    Ok(WorkspaceState {
+        path: display_path,
+        profile: Some(profile),
     })
 }
 
@@ -291,49 +286,81 @@ pub fn load_or_bootstrap() -> Result<WorkspaceDocument, String> {
 mod tests {
     use super::*;
 
+    fn sample_profile() -> WorkspaceProfile {
+        WorkspaceProfile {
+            version: PROFILE_VERSION,
+            workspace: "example-team".into(),
+            viewer_name: "Operator".into(),
+            relay_url: "wss://relay.example".into(),
+            channels: vec![
+                ChannelConfig {
+                    id: "0b7c0958-3f7f-48c8-af3f-31e549b10e31".into(),
+                    name: "general".into(),
+                    description: "Team channel".into(),
+                    authors: vec![AuthorConfig {
+                        pubkey: "19215c80f8a71880f8c5738410d041e8afb2093bde1df8b4b691f23a50cb8b13"
+                            .into(),
+                        name: Some("Agent".into()),
+                    }],
+                },
+                ChannelConfig {
+                    id: "1da2b83b-c1e5-44b3-8a1c-546bf665933e".into(),
+                    name: "ops".into(),
+                    description: String::new(),
+                    authors: Vec::new(),
+                },
+            ],
+            collectors: vec![CollectorConfig {
+                label: "Fleet".into(),
+                channel_id: "1da2b83b-c1e5-44b3-8a1c-546bf665933e".into(),
+                ssh_host: "control-tower@host.example.ts.net".into(),
+                command: "/usr/local/bin/control-tower-fleet-export".into(),
+            }],
+            local_runtime: None,
+        }
+    }
+
     #[test]
-    fn default_profile_is_valid_and_bounded() {
-        let profile = default_profile();
-        validate(&profile).expect("default profile validates");
+    fn sample_profile_is_valid_and_bounded() {
+        let profile = sample_profile();
+        validate(&profile).expect("sample profile validates");
         assert_eq!(profile.version, PROFILE_VERSION);
-        assert_eq!(profile.channels.len(), 2);
-        assert_eq!(profile.collectors.len(), 1);
     }
 
     #[test]
     fn rejects_invalid_identities_and_bindings() {
-        let mut duplicate = default_profile();
+        let mut duplicate = sample_profile();
         duplicate.channels[1].id = duplicate.channels[0].id.clone();
         assert!(validate(&duplicate).unwrap_err().contains("duplicate channel"));
 
-        let mut bad_author = default_profile();
+        let mut bad_author = sample_profile();
         bad_author.channels[0].authors[0].pubkey = "not-hex".into();
         assert!(validate(&bad_author).unwrap_err().contains("author pubkey"));
 
-        let mut orphan_collector = default_profile();
+        let mut orphan_collector = sample_profile();
         orphan_collector.collectors[0].channel_id =
             "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".into();
         assert!(validate(&orphan_collector)
             .unwrap_err()
             .contains("unlisted channel"));
 
-        let mut relative_command = default_profile();
+        let mut relative_command = sample_profile();
         relative_command.collectors[0].command = "control-tower-fleet-export; rm -rf /".into();
         assert!(validate(&relative_command)
             .unwrap_err()
             .contains("absolute path"));
 
-        let mut option_host = default_profile();
+        let mut option_host = sample_profile();
         option_host.collectors[0].ssh_host = "-oProxyCommand=evil@host".into();
         assert!(validate(&option_host).unwrap_err().contains("user@host"));
 
-        let mut bad_relay = default_profile();
-        bad_relay.relay_url = "https://buzz.nilor.cool".into();
+        let mut bad_relay = sample_profile();
+        bad_relay.relay_url = "https://relay.example".into();
         assert!(validate(&bad_relay).is_err());
     }
 
     #[test]
-    fn bootstraps_then_reloads_the_same_profile_from_disk() {
+    fn missing_profile_enters_onboarding_and_create_refuses_overwrite() {
         let path = std::env::temp_dir().join(format!(
             "control-tower-workspace-test-{}/workspace.json",
             std::process::id()
@@ -341,13 +368,29 @@ mod tests {
         let _ = fs::remove_file(&path);
         std::env::set_var("CONTROL_TOWER_WORKSPACE", &path);
 
-        let bootstrapped = load_or_bootstrap().expect("bootstrap profile");
-        assert!(bootstrapped.bootstrapped);
-        assert_eq!(bootstrapped.profile, default_profile());
+        let missing = load_state().expect("missing profile is not an error");
+        assert!(missing.profile.is_none());
 
-        let reloaded = load_or_bootstrap().expect("reload profile");
-        assert!(!reloaded.bootstrapped);
-        assert_eq!(reloaded.profile, default_profile());
+        let channel = ChannelConfig {
+            id: "0b7c0958-3f7f-48c8-af3f-31e549b10e31".into(),
+            name: "general".into(),
+            description: "Team channel".into(),
+            authors: Vec::new(),
+        };
+        let created =
+            create_initial_profile("wss://relay.example", "example-team", "Operator", channel.clone())
+                .expect("create initial profile");
+        let profile = created.profile.expect("profile present");
+        assert_eq!(profile.relay_url, "wss://relay.example");
+        assert_eq!(profile.channels.len(), 1);
+        assert!(profile.collectors.is_empty());
+
+        let reloaded = load_state().expect("reload profile");
+        assert_eq!(reloaded.profile, Some(profile));
+
+        let overwrite =
+            create_initial_profile("wss://other.example", "other", "Operator", channel);
+        assert!(overwrite.unwrap_err().contains("already exists"));
 
         std::env::remove_var("CONTROL_TOWER_WORKSPACE");
         let _ = fs::remove_file(&path);

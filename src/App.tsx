@@ -40,6 +40,7 @@ import type {
   DataConnection,
   TowerSnapshot,
 } from "./domain";
+import { Onboarding } from "./Onboarding";
 import { allAgents, countWorkingAgents, findAgent, matchesAgentSearch } from "./selectors";
 
 type DetailTab = "live" | "context" | "evidence" | "artifacts";
@@ -108,6 +109,15 @@ function App() {
 
   const agents = useMemo(() => (snapshot ? allAgents(snapshot) : []), [snapshot]);
   const selectedAgent = snapshot ? findAgent(snapshot, selectedId) ?? agents[0] : undefined;
+
+  if (connection.state === "onboarding") {
+    return (
+      <Onboarding
+        deviceIdentity={deviceIdentity}
+        onComplete={() => setRefreshVersion((version) => version + 1)}
+      />
+    );
+  }
 
   if (!snapshot || !selectedAgent) {
     return (

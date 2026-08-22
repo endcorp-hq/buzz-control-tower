@@ -37,10 +37,25 @@ export type WorkspaceProfile = {
   localRuntime?: { channelId: string; agentPubkey: string; agentName: string };
 };
 
-export type WorkspaceDocument = {
-  profile: WorkspaceProfile;
+export type WorkspaceState = {
   path: string;
-  bootstrapped: boolean;
+  profile?: WorkspaceProfile | null;
+};
+
+export type ChannelSummary = { id: string; name: string; description: string };
+
+export type DirectoryMember = {
+  pubkey: string;
+  name?: string;
+  role: string;
+  isAgent: boolean;
+};
+
+export type ChannelDirectory = {
+  channelId: string;
+  name: string;
+  description: string;
+  members: DirectoryMember[];
 };
 
 export type WorkspacePresentation = {
@@ -49,6 +64,7 @@ export type WorkspacePresentation = {
   relayUrl?: string;
   channels: Map<string, { name: string; description: string }>;
   authorNames: Map<string, string>;
+  authorRoles: Map<string, string>;
   fleetChannelId?: string;
 };
 
@@ -70,6 +86,7 @@ export function presentationFromProfile(profile: WorkspaceProfile): WorkspacePre
     relayUrl: profile.relayUrl,
     channels,
     authorNames,
+    authorRoles: new Map(),
     fleetChannelId: profile.collectors?.[0]?.channelId,
   };
 }
@@ -244,7 +261,7 @@ export function relayPagesSnapshot(
         id: `${page.channelId}-${pubkey}`,
         pubkey,
         agentName: authorName(presentation, pubkey),
-        role: "Channel participant",
+        role: presentation.authorRoles.get(pubkey) ?? "Channel participant",
         status: "idle" as const,
         statusLabel: "Relay visible",
         operation: "Showing signed public channel updates",
@@ -440,6 +457,52 @@ export function channelAuthorPubkeys(
   return [...authors].slice(0, MAX_RELAY_AUTHORS);
 }
 
+export type ChannelRoster = {
+  authorPubkeys: string[];
+  authorNames: Map<string, string>;
+  authorRoles: Map<string, string>;
+};
+
+// Merge the deterministic sources of "who to watch in this channel":
+// configured pins first (their names win and they can never be evicted by
+// the author cap), then the live relay roster discovered from signed
+// membership and agent-profile events, then the fleet collector roster.
+export function mergeChannelRoster(
+  channel: WorkspaceChannel,
+  directory: ChannelDirectory | undefined,
+  fleet: RemoteFleetDocument | undefined,
+): ChannelRoster {
+  const names = new Map<string, string>();
+  const roles = new Map<string, string>();
+  const pubkeys = new Set<string>();
+  for (const author of channel.authors ?? []) {
+    pubkeys.add(author.pubkey);
+    if (author.name) names.set(author.pubkey, author.name);
+  }
+  for (const member of directory?.members ?? []) {
+    pubkeys.add(member.pubkey);
+    if (member.name && !names.has(member.pubkey)) names.set(member.pubkey, member.name);
+    roles.set(member.pubkey, member.isAgent ? "Agent · channel roster" : "Human participant");
+  }
+  for (const author of channel.authors ?? []) {
+    if (!roles.has(author.pubkey)) roles.set(author.pubkey, "Pinned author");
+  }
+  for (const page of fleet?.pages ?? []) {
+    if (page.channelId === channel.id) pubkeys.add(page.agentPubkey);
+  }
+  for (const error of fleet?.errors ?? []) {
+    if (error.channelId === channel.id) pubkeys.add(error.agentPubkey);
+  }
+  return {
+    authorPubkeys: [...pubkeys].slice(0, MAX_RELAY_AUTHORS),
+    authorNames: names,
+    authorRoles: roles,
+  };
+}
+
+const DIRECTORY_TTL_MS = 60_000;
+const directoryCache = new Map<string, { at: number; directory: ChannelDirectory }>();
+
 class CompanionDataSource implements TowerDataSource {
   async loadSnapshot(): Promise<SnapshotLoadResult> {
     if (!isTauri()) {
@@ -453,9 +516,9 @@ class CompanionDataSource implements TowerDataSource {
       };
     }
 
-    let workspace: WorkspaceDocument;
+    let workspace: WorkspaceState;
     try {
-      workspace = await invoke<WorkspaceDocument>("load_workspace_profile");
+      workspace = await invoke<WorkspaceState>("load_workspace_state");
     } catch (error) {
       return {
         snapshot: structuredClone(fixtureSnapshot),
@@ -463,6 +526,16 @@ class CompanionDataSource implements TowerDataSource {
           state: "error",
           label: "Workspace profile invalid",
           detail: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+    if (!workspace.profile) {
+      return {
+        snapshot: structuredClone(fixtureSnapshot),
+        connection: {
+          state: "onboarding",
+          label: "Set up your workspace",
+          detail: `No workspace profile exists yet (${workspace.path}). Pick your relay and channel to start observing.`,
         },
       };
     }
@@ -489,13 +562,38 @@ class CompanionDataSource implements TowerDataSource {
     const relayPages = new Map<string, RelayActivityPage>();
     const relayFailures: string[] = [];
     await Promise.all(profile.channels.map(async (channel) => {
-      const authorPubkeys = channelAuthorPubkeys(channel, remoteDocument);
-      if (authorPubkeys.length === 0) return;
+      // Discover the live roster from signed relay events (cached briefly so
+      // the five-second refresh does not hammer the relay). A discovery
+      // failure falls back to the last known roster, then to configured pins.
+      const cacheKey = `${profile.relayUrl}|${channel.id}`;
+      const cached = directoryCache.get(cacheKey);
+      let directory = cached?.directory;
+      if (!cached || Date.now() - cached.at >= DIRECTORY_TTL_MS) {
+        try {
+          directory = await invoke<ChannelDirectory>("discover_channel_directory", {
+            relayUrl: profile.relayUrl,
+            channelId: channel.id,
+          });
+          directoryCache.set(cacheKey, { at: Date.now(), directory });
+        } catch (error) {
+          if (!directory) {
+            relayFailures.push(error instanceof Error ? error.message : String(error));
+          }
+        }
+      }
+      const roster = mergeChannelRoster(channel, directory, remoteDocument);
+      for (const [pubkey, name] of roster.authorNames) {
+        if (!presentation.authorNames.has(pubkey)) presentation.authorNames.set(pubkey, name);
+      }
+      for (const [pubkey, role] of roster.authorRoles) {
+        presentation.authorRoles.set(pubkey, role);
+      }
+      if (roster.authorPubkeys.length === 0) return;
       try {
         const page = await invoke<RelayActivityPage>("load_channel_activity", {
           relayUrl: profile.relayUrl,
           channelId: channel.id,
-          authorPubkeys,
+          authorPubkeys: roster.authorPubkeys,
           since,
           limit: 100,
         });

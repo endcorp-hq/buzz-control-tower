@@ -22,6 +22,16 @@ administration. The relay adapter then issues signed, read-only NIP-98 queries
 for standard channel-visible events. Fixture mode remains the browser preview
 and authorization fallback.
 
+Nothing is compiled in and no workspace is joined automatically. With no
+profile on disk the app runs a first-launch onboarding journey (relay →
+device admission → channel), and the only webview-reachable profile write
+refuses to run once a profile exists. Channel agents are never configured by
+hand: each refresh re-discovers the roster from signed relay events
+(kind:39002 membership roles, kind:10100 agent profiles, kind:0 names) via
+the same authenticated query path, so roster changes on the relay appear in
+every Tower client without any config or agent work (see
+`docs/ONBOARDING.md`).
+
 For a local agent, the native runtime adapter selects the newest Codex rollout
 whose latest trigger contains both the requested channel UUID and agent pubkey.
 It reduces only the latest turn. The React layer never receives the rollout

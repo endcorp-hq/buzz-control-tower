@@ -91,7 +91,7 @@ export type TowerSnapshot = {
 };
 
 export type DataConnection = {
-  state: "fixture" | "connected" | "setup-required" | "error";
+  state: "fixture" | "connected" | "setup-required" | "error" | "onboarding";
   label: string;
   detail: string;
 };

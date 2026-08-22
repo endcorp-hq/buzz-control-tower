@@ -146,38 +146,17 @@ fn validate_messages(
     Ok(messages)
 }
 
-pub async fn load_channel_activity(
+/// POST a signed, read-only NIP-98 filter set to the relay's `/query`
+/// endpoint and decode the event page. Shared by channel activity and the
+/// channel-directory discovery queries so every relay read uses the same
+/// device identity, size limits, and safe error mapping.
+pub(crate) async fn post_signed_query(
     device_keys: &nostr::Keys,
     relay_url: &str,
-    channel_id: &str,
-    author_pubkeys: &[String],
-    since: Option<u64>,
-    limit: Option<u32>,
-) -> Result<RelayActivityPage, String> {
-    Uuid::parse_str(channel_id).map_err(|_| "channel id must be a UUID".to_string())?;
-    if author_pubkeys.is_empty() || author_pubkeys.len() > MAX_AUTHORS {
-        return Err(format!(
-            "author list must contain 1 to {MAX_AUTHORS} pubkeys"
-        ));
-    }
-    let authors = author_pubkeys
-        .iter()
-        .map(|value| PublicKey::parse(value).map_err(|_| format!("invalid author pubkey: {value}")))
-        .collect::<Result<Vec<_>, _>>()?;
-    let limit = limit.unwrap_or(100).clamp(1, MAX_LIMIT);
+    filters: &serde_json::Value,
+) -> Result<Vec<Event>, String> {
     let query_url = http_query_url(relay_url)?;
-
-    let mut filter = serde_json::json!({
-        "kinds": [9, 40002, 40003, 40008],
-        "#h": [channel_id],
-        "authors": author_pubkeys,
-        "limit": limit,
-    });
-    if let Some(since) = since {
-        filter["since"] = serde_json::json!(since);
-    }
-    let body =
-        serde_json::to_vec(&[filter]).map_err(|error| format!("encode relay query: {error}"))?;
+    let body = serde_json::to_vec(filters).map_err(|error| format!("encode relay query: {error}"))?;
     let authorization = sign_nip98(device_keys, &query_url, &body)?;
     let response = reqwest::Client::builder()
         .timeout(Duration::from_secs(12))
@@ -215,8 +194,40 @@ pub async fn load_channel_activity(
     if response_body.len() as u64 > MAX_RESPONSE_BYTES {
         return Err("relay response exceeds the 2 MiB safety limit".to_string());
     }
-    let events = serde_json::from_slice::<Vec<Event>>(&response_body)
-        .map_err(|error| format!("decode relay response: {error}"))?;
+    serde_json::from_slice::<Vec<Event>>(&response_body)
+        .map_err(|error| format!("decode relay response: {error}"))
+}
+
+pub async fn load_channel_activity(
+    device_keys: &nostr::Keys,
+    relay_url: &str,
+    channel_id: &str,
+    author_pubkeys: &[String],
+    since: Option<u64>,
+    limit: Option<u32>,
+) -> Result<RelayActivityPage, String> {
+    Uuid::parse_str(channel_id).map_err(|_| "channel id must be a UUID".to_string())?;
+    if author_pubkeys.is_empty() || author_pubkeys.len() > MAX_AUTHORS {
+        return Err(format!(
+            "author list must contain 1 to {MAX_AUTHORS} pubkeys"
+        ));
+    }
+    let authors = author_pubkeys
+        .iter()
+        .map(|value| PublicKey::parse(value).map_err(|_| format!("invalid author pubkey: {value}")))
+        .collect::<Result<Vec<_>, _>>()?;
+    let limit = limit.unwrap_or(100).clamp(1, MAX_LIMIT);
+
+    let mut filter = serde_json::json!({
+        "kinds": [9, 40002, 40003, 40008],
+        "#h": [channel_id],
+        "authors": author_pubkeys,
+        "limit": limit,
+    });
+    if let Some(since) = since {
+        filter["since"] = serde_json::json!(since);
+    }
+    let events = post_signed_query(device_keys, relay_url, &serde_json::json!([filter])).await?;
 
     Ok(RelayActivityPage {
         relay_url: relay_url.to_string(),

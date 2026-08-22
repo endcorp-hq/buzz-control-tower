@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   channelAuthorPubkeys,
   fleetRosterPubkeys,
+  mergeChannelRoster,
   presentationFromProfile,
   relaySnapshot,
   runtimePagesSnapshot,
   runtimeSnapshot,
+  type ChannelDirectory,
   type RelayActivityPage,
   type RuntimeWorkstreamPage,
   type WorkspaceProfile,
@@ -243,6 +245,80 @@ describe("companion runtime snapshot", () => {
       }],
     });
     expect(authors).toEqual(["4".repeat(64), "1".repeat(64), "2".repeat(64)]);
+  });
+
+  it("discovers channel agents from the relay roster with pins winning names", () => {
+    const channel = {
+      id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      name: "general",
+      authors: [{ pubkey: "4".repeat(64), name: "Pinned-Name" }],
+    };
+    const directory: ChannelDirectory = {
+      channelId: channel.id,
+      name: "general",
+      description: "",
+      members: [
+        { pubkey: "4".repeat(64), name: "Relay-Name", role: "owner", isAgent: true },
+        { pubkey: "6".repeat(64), name: "thor-mos-psc", role: "bot", isAgent: true },
+        { pubkey: "7".repeat(64), name: "Lucas", role: "admin", isAgent: false },
+      ],
+    };
+    const roster = mergeChannelRoster(channel, directory, {
+      pages: [{ agentPubkey: "8".repeat(64), channelId: channel.id } as RuntimeWorkstreamPage],
+      errors: [],
+    });
+
+    expect(roster.authorPubkeys).toEqual([
+      "4".repeat(64),
+      "6".repeat(64),
+      "7".repeat(64),
+      "8".repeat(64),
+    ]);
+    expect(roster.authorNames.get("4".repeat(64))).toBe("Pinned-Name");
+    expect(roster.authorNames.get("6".repeat(64))).toBe("thor-mos-psc");
+    expect(roster.authorRoles.get("6".repeat(64))).toBe("Agent · channel roster");
+    expect(roster.authorRoles.get("7".repeat(64))).toBe("Human participant");
+  });
+
+  it("falls back to configured pins when no roster is discoverable", () => {
+    const channel = {
+      id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      name: "general",
+      authors: [{ pubkey: "4".repeat(64), name: "Pinned-Name" }],
+    };
+    const roster = mergeChannelRoster(channel, undefined, undefined);
+    expect(roster.authorPubkeys).toEqual(["4".repeat(64)]);
+    expect(roster.authorRoles.get("4".repeat(64))).toBe("Pinned author");
+  });
+
+  it("labels discovered agents and humans in the relay snapshot", () => {
+    const profile: WorkspaceProfile = {
+      version: 1,
+      workspace: "example.org",
+      viewerName: "Sam",
+      relayUrl: "wss://buzz.example.org",
+      channels: [{ id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", name: "general", description: "" }],
+    };
+    const presentation = presentationFromProfile(profile);
+    presentation.authorNames.set("6".repeat(64), "thor-mos-psc");
+    presentation.authorRoles.set("6".repeat(64), "Agent · channel roster");
+
+    const snapshot = relaySnapshot({
+      relayUrl: profile.relayUrl,
+      channelId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      devicePubkey: "a".repeat(64),
+      messages: [{
+        id: "b".repeat(64),
+        pubkey: "6".repeat(64),
+        kind: 9,
+        createdAt: 1_800_000_000,
+        content: "Discovered agent update",
+      }],
+    }, presentation);
+
+    const agent = snapshot.channels[0].workstreams[0].agents[0];
+    expect(agent.agentName).toBe("thor-mos-psc");
+    expect(agent.role).toBe("Agent · channel roster");
   });
 
   it("keeps configured but unavailable fleet agents visible", () => {
