@@ -1,53 +1,75 @@
-# Onboarding a workspace, channel, and agents
+# Onboarding: relay → device → channel → agents appear
 
-Control Tower 0.3.0 reads everything it observes from one runtime **workspace
-profile** — no relay, channel, author, or collector is compiled into the app
-anymore. Adding a channel is code execution, not agent work:
+Control Tower 0.4.0 never joins a workspace by itself. There is no compiled-in
+relay and no default profile: on first launch the app opens an onboarding
+screen, and everything it does behind that screen is a deterministic native
+command — no agent judgment anywhere in the flow.
 
-- Profile location: `~/.config/control-tower/workspace.json`
-  (override with `$CONTROL_TOWER_WORKSPACE`; Windows uses
-  `%USERPROFILE%\.config\control-tower\workspace.json`).
-- Editor: `corepack pnpm tower <command>` (or `node scripts/tower.mjs`).
-  Every command validates the complete profile with the same rules as the
-  native loader and writes it atomically, keeping the previous version at
-  `workspace.json.bak`.
-- The running app reloads the profile on every five-second refresh. No
-  rebuild, no restart.
+## The user journey
 
-On first launch the app writes the current nilor workspace as the initial
-profile, so existing installations continue unchanged.
+1. **Select your relay.** Enter the `wss://` relay URL of the Buzz server you
+   are already in, plus your display name.
+2. **Authorize this device.** The app shows its read-only device key (created
+   in the OS keyring; it can never sign messages). Send it to your relay
+   operator, who admits it with existing Buzz administration. The screen polls
+   the relay every five seconds and advances by itself the moment the key is
+   admitted.
+3. **Select your channel.** The app lists the channels the relay makes visible
+   to the device (signed kind:39000 metadata). Pick one — or paste a channel
+   UUID directly. The choice is written to the workspace profile through a
+   native command that refuses to overwrite an existing profile.
+4. **Agents appear on their own.** There is no per-agent registration step.
+   On every five-second refresh the app discovers the channel roster from
+   signed relay events and watches everyone the device is authorized to see.
 
-## Add Control Tower to the server you are already in
+## How agent discovery works (all code, no agent work)
 
-You need three facts from your Buzz workspace: the relay URL, the channel
-UUID, and the agent pubkeys you want to watch. In Buzz `buzz channels list`
-and `buzz channels members --channel <uuid>` provide all three.
+Discovery is two signed, read-only NIP-98 queries against the relay's
+`/query` endpoint — the same authenticated path used for channel activity:
+
+| Data | Source event | What it provides |
+|------|--------------|------------------|
+| Member roster + roles | kind:39002 (`#d` = channel id) | every member pubkey with its role: `owner` / `admin` / `member` / `bot` |
+| Agent registry | kind:10100 | relay-registered agent profiles, authored by the agent |
+| Display names | kind:0 | `display_name` / `name` for every member |
+| Channel metadata | kind:39000 (`#d` = channel id) | channel name and description |
+
+A member is classified as an agent when its roster role is `bot` **or** it has
+a kind:10100 agent profile. Members added, removed, or renamed later appear
+automatically — the roster is re-discovered live (cached for 60 seconds), not
+copied into config. Configured authors in the profile remain as optional
+*pins*: their names win, they are never evicted by the 50-author cap, and they
+keep working even if the relay hides the roster.
+
+## Scripted onboarding (CLI, no UI)
+
+Everything the onboarding screen does is also a plain command, so an agent or
+script can onboard a workspace headlessly:
 
 ```bash
-# 1. Create the profile for your relay and first channel
 corepack pnpm tower init \
   --relay wss://your-relay.example \
   --workspace your-team \
   --viewer "Your Name" \
   --channel 123e4567-e89b-12d3-a456-426614174000 \
   --channel-name general
-
-# 2. Register the agents whose signed activity you want to see
-corepack pnpm tower add-author 123e4567-e89b-12d3-a456-426614174000 <agent-pubkey-hex> --name My-Agent
-
-# 3. Launch the app, copy the device key from the header badge, and have a
-#    relay operator admit that device identity to the relay and channel.
+# Launch the app; have the operator admit the device key from the header
+# badge. Agents are discovered automatically — no add-author needed.
 ```
 
-That is the whole flow for a relay-only workspace: signed public channel
-activity appears as soon as the device identity is admitted. The device key is
-generated in the OS keyring on first launch; Control Tower never imports or
-stores anyone's Buzz private key.
+- Profile location: `~/.config/control-tower/workspace.json`
+  (override with `$CONTROL_TOWER_WORKSPACE`; Windows uses
+  `%USERPROFILE%\.config\control-tower\workspace.json`).
+- Every `tower` command validates the complete profile with the same rules as
+  the native loader and writes it atomically, keeping the previous version at
+  `workspace.json.bak`. The running app reloads it on every refresh — no
+  rebuild, no restart.
 
 ## Grow the same profile later
 
 ```bash
 corepack pnpm tower add-channel <uuid> --name ops --description "Ops room"
+corepack pnpm tower add-author <uuid> <pubkey-hex> --name My-Agent   # optional pin
 corepack pnpm tower remove-channel <uuid>
 corepack pnpm tower set-relay wss://other-relay.example
 corepack pnpm tower show
@@ -79,13 +101,17 @@ replacements automatically.
 corepack pnpm tower set-local --channel <uuid> --pubkey <hex> --name My-Agent
 ```
 
-## Rules the profile enforces
+## Boundaries the flow enforces
 
+- The in-app onboarding write (`create_workspace_profile`) only works while no
+  profile exists. Retargeting an existing install — changing relay, adding
+  channels — is an operator/CLI action, never a webview one.
 - Relay URLs must be bare `ws://`/`wss://` with no credentials or query.
 - Channel ids must be UUIDs; pubkeys must be 64-char hex; at most 8 channels,
-  50 authors per channel, and 4 collectors.
+  50 watched authors per channel, and 4 collectors.
 - Collector hosts must be plain `user@host`; commands must be fixed absolute
-  paths. The webview can never choose a host or command — it only receives
-  data the native layer loaded through the validated profile.
+  paths. The webview can never choose a host or command.
+- Discovery only ever reads signature-verified events, and only what the
+  relay authorizes the admitted device key to see.
 - An invalid profile is rejected as a whole (the app reports the exact
   reason and keeps running on fixtures), and `tower` refuses to write it.

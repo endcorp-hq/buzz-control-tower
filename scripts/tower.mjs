@@ -2,9 +2,14 @@
 // Deterministic workspace-profile editor for Buzz Control Tower.
 //
 // Every subcommand validates with the same rules as the native Rust loader
-// and writes the profile atomically, so onboarding a relay, channel, agent
-// author, or fleet collector is plain code execution — no app rebuild and no
-// bespoke agent work. Mutations print the resulting profile as JSON.
+// and writes the profile atomically, so onboarding a relay, channel, or fleet
+// collector is plain code execution — no app rebuild and no bespoke agent
+// work. Mutations print the resulting profile as JSON.
+//
+// Channel agents are discovered live by the app from signed relay events
+// (kind:39002 roster roles + kind:10100 agent profiles + kind:0 names), so
+// `add-author` is an optional pin — pinned names win and pins survive even if
+// the relay hides the roster. See docs/ONBOARDING.md.
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -315,7 +320,7 @@ const USAGE = `Buzz Control Tower workspace commands (profile: ~/.config/control
   tower init --relay <wss://relay> --workspace <name> --channel <uuid> --channel-name <name> [--viewer <name>] [--description <text>] [--author <hex[:name]>]... [--force]
   tower add-channel <channel-uuid> --name <name> [--description <text>] [--author <hex[:name]>]...
   tower remove-channel <channel-uuid>
-  tower add-author <channel-uuid> <pubkey-hex> [--name <display-name>]
+  tower add-author <channel-uuid> <pubkey-hex> [--name <display-name>]   (optional pin; agents are auto-discovered)
   tower add-collector --channel <uuid> --label <label> --host <user@host> --command </absolute/exporter/path>
   tower remove-collector --label <label>
   tower set-local --channel <uuid> --pubkey <hex> --name <agent-name>

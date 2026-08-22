@@ -280,3 +280,40 @@ button { color: inherit; }
   .artifact-list article { grid-template-columns: 40px minmax(0, 1fr) auto; }
   .artifact-list code, .artifact-list time { display: none; }
 }
+
+/* First-run onboarding */
+.onboarding-shell { min-height: 100vh; display: grid; place-content: center; padding: 24px; background: radial-gradient(circle at 70% 12%, rgba(90, 78, 48, 0.12), transparent 34%), #090a0d; }
+.onboarding-card { width: min(560px, 92vw); display: flex; flex-direction: column; gap: 18px; padding: 26px 28px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 18px 60px rgba(0, 0, 0, .5); }
+.onboarding-brand { display: flex; align-items: center; gap: 13px; }
+.onboarding-brand h1 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
+.onboarding-brand p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+.onboarding-steps { display: flex; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.onboarding-steps li { flex: 1; display: flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .05em; }
+.onboarding-steps li.active { color: var(--amber); border-color: rgba(246, 184, 74, .35); background: var(--amber-soft); }
+.onboarding-steps li.done { color: var(--green); }
+.onboarding-form { display: flex; flex-direction: column; gap: 12px; }
+.onboarding-form label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--muted); }
+.onboarding-form input, .onboarding-manual input { padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; color: #e7e9ef; background: var(--panel-high); font: 12px var(--mono); }
+.onboarding-form input:focus, .onboarding-manual input:focus { outline: none; border-color: rgba(246, 184, 74, .4); }
+.onboarding-form button, .onboarding-actions button, .onboarding-manual button, .onboarding-channel-list button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 13px; border: 1px solid rgba(246, 184, 74, .25); border-radius: 8px; color: var(--amber); background: var(--amber-soft); font-size: 12px; cursor: pointer; }
+.onboarding-form button:hover:not(:disabled), .onboarding-actions button:hover:not(:disabled), .onboarding-manual button:hover:not(:disabled) { border-color: rgba(246, 184, 74, .5); }
+.onboarding-form button:disabled, .onboarding-actions button:disabled, .onboarding-manual button:disabled, .onboarding-channel-list button:disabled { opacity: .5; cursor: default; }
+.onboarding-authorize, .onboarding-channels { display: flex; flex-direction: column; gap: 12px; }
+.onboarding-authorize p, .onboarding-channels p { margin: 0; color: #c6c9d2; font-size: 12px; line-height: 1.55; }
+.onboarding-key { padding: 10px 12px; border: 1px dashed rgba(246, 184, 74, .3); border-radius: 8px; color: var(--amber); background: rgba(246, 184, 74, .05); font: 10px var(--mono); word-break: break-all; }
+.onboarding-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.onboarding-secondary { align-self: flex-start; padding: 6px 0; border: none; background: none; color: var(--muted); font-size: 11px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.onboarding-channel-list { display: flex; flex-direction: column; gap: 7px; max-height: 260px; overflow-y: auto; }
+.onboarding-channel-list button { justify-content: flex-start; text-align: left; gap: 9px; background: var(--panel-high); border-color: var(--line); color: #e7e9ef; }
+.onboarding-channel-list button:hover:not(:disabled) { border-color: rgba(246, 184, 74, .4); }
+.onboarding-channel-list .hash { color: var(--amber); font: 13px var(--mono); }
+.onboarding-channel-copy { display: flex; flex-direction: column; gap: 2px; }
+.onboarding-channel-copy strong { font-size: 12.5px; }
+.onboarding-channel-copy span { color: var(--muted); font-size: 11px; }
+.onboarding-manual { display: flex; gap: 8px; }
+.onboarding-manual input { flex: 1; }
+.onboarding-note { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.onboarding-error { margin: 0; padding: 9px 11px; border: 1px solid rgba(255, 123, 123, .3); border-radius: 8px; color: var(--red); background: rgba(255, 123, 123, .07); font-size: 11.5px; }
+.onboarding-foot { display: flex; align-items: center; gap: 6px; margin: 0; padding-top: 4px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10.5px; }
+.onboarding-foot code { color: #c6c9d2; font: 10px var(--mono); }
+.source-onboarding { color: #d3b476; background: rgba(246,184,74,.08); }
