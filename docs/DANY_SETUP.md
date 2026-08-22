@@ -1,6 +1,6 @@
 # Dany setup
 
-Dany can build and run Control Tower 0.2.0 on `desktop-vfmf3b6` without
+Dany can build and run Control Tower 0.3.0 on `desktop-vfmf3b6` without
 joining the nilor tailnet or switching away from `dany@vividstudio.me`.
 
 ## Network state already prepared
@@ -93,11 +93,14 @@ register one fixed exporter source in the collector; after that, all Tower
 clients discover additions, removals, renames, and identity replacements
 without an app rebuild. Never post an agent private key or provider credential.
 
-Control Tower 0.2.0 does not yet auto-discover arbitrary personal agents running
-locally on Dany's Windows machine. The current local adapter follows one
-compiled local target, while the MOS fleet comes from the authenticated Doha
-registry. Local multi-agent discovery belongs with the planned workspace and
-connection-profile work rather than being silently inferred from Buzz Desktop.
+Since 0.3.0, every relay, channel, author, and collector binding lives in the
+runtime workspace profile at `%USERPROFILE%\.config\control-tower\workspace.json`,
+edited with `corepack pnpm tower <command>` — see `docs/ONBOARDING.md`. The
+first launch writes the current nilor workspace automatically, so the MOS
+fleet works with no extra step. Control Tower still does not auto-discover
+arbitrary personal agents running locally on Dany's Windows machine; a local
+runtime is followed only when the profile's `localRuntime` names it, and
+multi-workspace switching remains future work.
 
 ## Acceptance test
 

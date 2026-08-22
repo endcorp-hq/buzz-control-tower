@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  channelAuthorPubkeys,
   fleetRosterPubkeys,
+  presentationFromProfile,
   relaySnapshot,
   runtimePagesSnapshot,
   runtimeSnapshot,
   type RelayActivityPage,
   type RuntimeWorkstreamPage,
+  type WorkspaceProfile,
 } from "./dataSource";
 
 describe("companion relay snapshot", () => {
@@ -167,6 +170,79 @@ describe("companion runtime snapshot", () => {
     expect(snapshot.channels.map((channel) => channel.name)).toEqual(["mos-boston", "buzz-control-tower"]);
     expect(snapshot.channels[0].workstreams[0].agents[0].role).toContain("Doha");
     expect(snapshot.channels[1].workstreams[0].agents[0].role).toBe("Local agent runtime");
+  });
+
+  it("presents channels and authors from a runtime workspace profile", () => {
+    const profile: WorkspaceProfile = {
+      version: 1,
+      workspace: "example.org",
+      viewerName: "Sam",
+      relayUrl: "wss://buzz.example.org",
+      channels: [
+        {
+          id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          name: "general",
+          description: "Team room",
+          authors: [{ pubkey: "4".repeat(64), name: "Sam-Agent" }],
+        },
+      ],
+      collectors: [{
+        label: "Example fleet",
+        channelId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        sshHost: "control-tower@fleet.example.ts.net",
+        command: "/usr/local/bin/control-tower-fleet-export",
+      }],
+    };
+    const presentation = presentationFromProfile(profile);
+
+    const snapshot = relaySnapshot({
+      relayUrl: profile.relayUrl,
+      channelId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      devicePubkey: "a".repeat(64),
+      messages: [{
+        id: "b".repeat(64),
+        pubkey: "4".repeat(64),
+        kind: 9,
+        createdAt: 1_800_000_000,
+        content: "Hello from a new workspace",
+      }],
+    }, presentation);
+
+    expect(snapshot.workspaceName).toBe("example.org");
+    expect(snapshot.relayUrl).toBe("wss://buzz.example.org");
+    expect(snapshot.channels[0].name).toBe("general");
+    expect(snapshot.channels[0].workstreams[0].agents[0].agentName).toBe("Sam-Agent");
+
+    const unavailableSnapshot = runtimePagesSnapshot([], [{
+      agentPubkey: "5".repeat(64),
+      agentName: "fleet-agent",
+      sourceLabel: "Example host",
+      detail: "offline",
+    }], presentation);
+    expect(unavailableSnapshot.channels[0].id).toBe("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    expect(unavailableSnapshot.channels[0].name).toBe("general");
+  });
+
+  it("merges profile authors with the collector roster per channel", () => {
+    const channel = {
+      id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      name: "general",
+      authors: [{ pubkey: "4".repeat(64), name: "Sam-Agent" }],
+    };
+    const authors = channelAuthorPubkeys(channel, {
+      pages: [
+        { agentPubkey: "1".repeat(64), channelId: channel.id } as RuntimeWorkstreamPage,
+        { agentPubkey: "9".repeat(64), channelId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" } as RuntimeWorkstreamPage,
+      ],
+      errors: [{
+        agentPubkey: "2".repeat(64),
+        agentName: "offline-agent",
+        sourceLabel: "Host",
+        detail: "offline",
+        channelId: channel.id,
+      }],
+    });
+    expect(authors).toEqual(["4".repeat(64), "1".repeat(64), "2".repeat(64)]);
   });
 
   it("keeps configured but unavailable fleet agents visible", () => {

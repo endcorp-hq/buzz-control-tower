@@ -157,7 +157,10 @@ function App() {
           <div className="brand-mark"><Zap size={19} fill="currentColor" /></div>
           <div>
             <div className="brand-name">Control Tower</div>
-            <div className="workspace-name">{snapshot.workspaceName}</div>
+            <div className="workspace-name">
+              {snapshot.workspaceName}
+              {snapshot.relayUrl ? ` · ${snapshot.relayUrl.replace(/^wss?:\/\//, "")}` : ""}
+            </div>
           </div>
         </div>
 

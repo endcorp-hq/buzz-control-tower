@@ -2,6 +2,7 @@ mod device_identity;
 mod local_workstream;
 mod relay_activity;
 mod remote_workstream;
+mod workspace_profile;
 
 use tauri::State;
 
@@ -49,8 +50,13 @@ fn load_local_workstream(
 }
 
 #[tauri::command]
-fn load_mos_fleet_workstreams() -> Result<remote_workstream::RemoteFleetDocument, String> {
-    remote_workstream::load_mos_fleet_workstreams()
+fn load_fleet_workstreams() -> Result<remote_workstream::RemoteFleetDocument, String> {
+    remote_workstream::load_fleet_workstreams()
+}
+
+#[tauri::command]
+fn load_workspace_profile() -> Result<workspace_profile::WorkspaceDocument, String> {
+    workspace_profile::load_or_bootstrap()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -62,7 +68,8 @@ pub fn run() {
             get_device_identity,
             load_channel_activity,
             load_local_workstream,
-            load_mos_fleet_workstreams
+            load_fleet_workstreams,
+            load_workspace_profile
         ])
         .run(tauri::generate_context!())
         .expect("error while running Buzz Control Tower");

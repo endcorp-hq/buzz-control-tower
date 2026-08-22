@@ -1,7 +1,7 @@
 {
   "name": "buzz-control-tower",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port 1420",
@@ -9,6 +9,7 @@
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:exporter": "python3 -m unittest discover -s exporters -p 'test_*.py'",
+    "tower": "node scripts/tower.mjs",
     "check": "corepack pnpm typecheck && corepack pnpm test && corepack pnpm test:exporter && corepack pnpm build && cargo test --manifest-path src-tauri/Cargo.toml",
     "tauri": "tauri"
   },

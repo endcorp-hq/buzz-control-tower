@@ -13,7 +13,10 @@ installer. It targets macOS, Windows, and Linux through Tauri 2.
 - Fixture-driven domain model with a clean relay-data boundary
 - OS-keyring device identity and a read-only standard-event relay adapter
 - Source-redacted local Codex runtime workstream for the selected agent
-- Source-redacted MOS fleet workstreams through one forced-command Doha collector
+- Source-redacted fleet workstreams through forced-command SSH collectors
+- One runtime workspace profile driving every relay, channel, author, and
+  collector binding, edited by the deterministic `tower` CLI
+  (`docs/ONBOARDING.md`) — adding a channel needs no rebuild
 
 ## Run the desktop MVP
 

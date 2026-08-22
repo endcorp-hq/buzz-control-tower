@@ -1,9 +1,10 @@
-//! Fixed, credential-free transport for the MOS agent fleet observer.
+//! Fixed, credential-free transport for remote agent fleet observers.
 //!
 //! Authentication is delegated to the host operating system's existing
 //! Tailscale SSH session. The webview cannot select a host or remote command;
-//! it receives only a bounded document whose identities come from the
-//! root-owned collector registry.
+//! every collector host, command, and channel binding comes from the validated
+//! on-disk workspace profile, and identities come from each collector's
+//! root-owned registry.
 
 use std::collections::HashSet;
 use std::io::Read;
@@ -14,10 +15,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::local_workstream::{redact_result, redact_visible, RuntimeWorkstreamPage};
+use crate::workspace_profile::{load_or_bootstrap, CollectorConfig};
 
-const DOHA_HOST: &str = "control-tower@mos-agent.tailc8418d.ts.net";
-const EXPORT_COMMAND: &str = "/usr/local/bin/control-tower-fleet-export";
-const MOS_CHANNEL_ID: &str = "1da2b83b-c1e5-44b3-8a1c-546bf665933e";
 const MAX_REMOTE_DOCUMENT: usize = 10 * 1024 * 1024;
 const MAX_FLEET_SOURCES: usize = 16;
 const MAX_CONTEXT_FIELDS: usize = 12;
@@ -35,13 +34,30 @@ pub struct RemoteSourceError {
     pub agent_name: String,
     pub source_label: String,
     pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectorError {
+    pub label: String,
+    pub detail: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct CollectorDocument {
+    pub pages: Vec<RuntimeWorkstreamPage>,
+    pub errors: Vec<RemoteSourceError>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoteFleetDocument {
     pub pages: Vec<RuntimeWorkstreamPage>,
     pub errors: Vec<RemoteSourceError>,
+    pub collector_errors: Vec<CollectorError>,
 }
 
 fn valid_roster_identity(pubkey: &str, name: &str, label: &str) -> bool {
@@ -87,24 +103,27 @@ fn redact_page(page: &mut RuntimeWorkstreamPage) {
     }
 }
 
-fn parse_document(bytes: &[u8]) -> Result<RemoteFleetDocument, String> {
+fn parse_collector_document(
+    bytes: &[u8],
+    expected_channel: &str,
+    identities: &mut HashSet<String>,
+) -> Result<CollectorDocument, String> {
     if bytes.is_empty() || bytes.len() > MAX_REMOTE_DOCUMENT {
         return Err("Fleet exporter returned an invalid document size".into());
     }
-    let mut document: RemoteFleetDocument = serde_json::from_slice(bytes)
+    let mut document: CollectorDocument = serde_json::from_slice(bytes)
         .map_err(|_| "Fleet exporter returned an invalid workstream document".to_string())?;
     let source_count = document.pages.len() + document.errors.len();
     if !(1..=MAX_FLEET_SOURCES).contains(&source_count) {
         return Err("Fleet exporter returned an invalid roster size".into());
     }
 
-    let mut identities = HashSet::new();
     for page in &mut document.pages {
         let label = page
             .source_label
             .as_deref()
             .ok_or_else(|| "Fleet exporter omitted a source label".to_string())?;
-        if page.channel_id != MOS_CHANNEL_ID
+        if page.channel_id != expected_channel
             || !valid_roster_identity(&page.agent_pubkey, &page.agent_name, label)
             || !identities.insert(page.agent_pubkey.clone())
         {
@@ -133,11 +152,12 @@ fn parse_document(bytes: &[u8]) -> Result<RemoteFleetDocument, String> {
         error.agent_name = redact_visible(&error.agent_name);
         error.source_label = redact_visible(&error.source_label);
         error.detail = redact_visible(&error.detail);
+        error.channel_id = Some(expected_channel.to_string());
     }
     Ok(document)
 }
 
-pub fn load_mos_fleet_workstreams() -> Result<RemoteFleetDocument, String> {
+fn fetch_collector_bytes(collector: &CollectorConfig) -> Result<Vec<u8>, String> {
     let mut child = Command::new(SSH_PROGRAM)
         .args([
             "-o",
@@ -152,8 +172,8 @@ pub fn load_mos_fleet_workstreams() -> Result<RemoteFleetDocument, String> {
             "ServerAliveInterval=3",
             "-o",
             "ServerAliveCountMax=1",
-            DOHA_HOST,
-            EXPORT_COMMAND,
+            &collector.ssh_host,
+            &collector.command,
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -198,12 +218,49 @@ pub fn load_mos_fleet_workstreams() -> Result<RemoteFleetDocument, String> {
             status.code().unwrap_or(-1)
         ));
     }
-    parse_document(&bytes)
+    Ok(bytes)
+}
+
+pub fn load_fleet_workstreams() -> Result<RemoteFleetDocument, String> {
+    let workspace = load_or_bootstrap()?;
+    let collectors = &workspace.profile.collectors;
+    if collectors.is_empty() {
+        return Err("the workspace profile configures no fleet collectors".into());
+    }
+
+    let mut document = RemoteFleetDocument {
+        pages: Vec::new(),
+        errors: Vec::new(),
+        collector_errors: Vec::new(),
+    };
+    let mut identities = HashSet::new();
+    for collector in collectors {
+        let outcome = fetch_collector_bytes(collector).and_then(|bytes| {
+            parse_collector_document(&bytes, &collector.channel_id, &mut identities)
+        });
+        match outcome {
+            Ok(mut collected) => {
+                document.pages.append(&mut collected.pages);
+                document.errors.append(&mut collected.errors);
+            }
+            Err(detail) => document.collector_errors.push(CollectorError {
+                label: collector.label.clone(),
+                detail,
+            }),
+        }
+    }
+    if document.pages.is_empty() && document.errors.is_empty() {
+        let first = &document.collector_errors[0];
+        return Err(format!("{}: {}", first.label, first.detail));
+    }
+    Ok(document)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const MOS_CHANNEL_ID: &str = "1da2b83b-c1e5-44b3-8a1c-546bf665933e";
 
     fn source(index: usize, name: &str, label: &str) -> (String, String, String) {
         (format!("{index:064x}"), name.into(), label.into())
@@ -264,9 +321,13 @@ mod tests {
         .expect("document json")
     }
 
+    fn parse(bytes: &[u8]) -> Result<CollectorDocument, String> {
+        parse_collector_document(bytes, MOS_CHANNEL_ID, &mut HashSet::new())
+    }
+
     #[test]
     fn validates_every_identity_and_redacts_again() {
-        let document = parse_document(&complete_document()).expect("document");
+        let document = parse(&complete_document()).expect("document");
         let serialized = serde_json::to_string(&document).expect("serialize");
         assert!(!serialized.contains("secret-value"));
         assert!(!serialized.contains("nsec1abcdefghijklmnop"));
@@ -277,6 +338,10 @@ mod tests {
         assert_eq!(document.pages.len(), 1);
         assert_eq!(document.errors.len(), 1);
         assert_eq!(document.errors[0].agent_name, "thor-mos-psc");
+        assert_eq!(
+            document.errors[0].channel_id.as_deref(),
+            Some(MOS_CHANNEL_ID)
+        );
     }
 
     #[test]
@@ -288,7 +353,8 @@ mod tests {
         value["errors"][0]["agentName"] = replacement.1.clone().into();
         value["errors"][0]["sourceLabel"] = replacement.2.clone().into();
 
-        let document = parse_document(&serde_json::to_vec(&value).expect("json")).expect("roster");
+        let document =
+            parse(&serde_json::to_vec(&value).expect("json")).expect("roster");
         assert_eq!(document.errors[0].agent_pubkey, replacement.0);
         assert_eq!(document.errors[0].agent_name, replacement.1);
     }
@@ -297,32 +363,40 @@ mod tests {
     fn rejects_empty_duplicate_or_wrong_channel_rosters() {
         let empty =
             serde_json::to_vec(&serde_json::json!({"pages": [], "errors": []})).expect("json");
-        assert!(parse_document(&empty).unwrap_err().contains("roster size"));
+        assert!(parse(&empty).unwrap_err().contains("roster size"));
 
         let mut duplicate: serde_json::Value =
             serde_json::from_slice(&complete_document()).expect("json");
         duplicate["errors"][0]["agentPubkey"] = duplicate["pages"][0]["agentPubkey"].clone();
-        assert!(
-            parse_document(&serde_json::to_vec(&duplicate).expect("json"))
-                .unwrap_err()
-                .contains("duplicate")
-        );
+        assert!(parse(&serde_json::to_vec(&duplicate).expect("json"))
+            .unwrap_err()
+            .contains("duplicate"));
 
         let mut wrong_channel: serde_json::Value =
             serde_json::from_slice(&complete_document()).expect("json");
         wrong_channel["pages"][0]["channelId"] = "00000000-0000-0000-0000-000000000000".into();
+        assert!(parse(&serde_json::to_vec(&wrong_channel).expect("json"))
+            .unwrap_err()
+            .contains("invalid"));
+    }
+
+    #[test]
+    fn rejects_duplicate_identities_across_collectors() {
+        let mut identities = HashSet::new();
+        parse_collector_document(&complete_document(), MOS_CHANNEL_ID, &mut identities)
+            .expect("first collector");
         assert!(
-            parse_document(&serde_json::to_vec(&wrong_channel).expect("json"))
+            parse_collector_document(&complete_document(), MOS_CHANNEL_ID, &mut identities)
                 .unwrap_err()
-                .contains("invalid")
+                .contains("duplicate")
         );
     }
 
     #[test]
     #[ignore = "requires Tailscale SSH access to the deployed fleet exporter"]
     fn live_fleet_probe_uses_the_fixed_redacted_contract() {
-        let document = load_mos_fleet_workstreams().expect("fleet workstreams");
-        assert!(document.pages.len() >= 3);
+        let document = load_fleet_workstreams().expect("fleet workstreams");
+        assert!(document.pages.len() + document.errors.len() >= 3);
         let serialized = serde_json::to_string(&document).expect("serialize");
         for forbidden in [
             "reasoningEncryptedContent",

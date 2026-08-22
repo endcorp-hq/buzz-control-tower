@@ -59,19 +59,26 @@ second time in native Rust before React receives it.
 - Root-owned remote collector registry bounded to the approved MOS channel
 - Fixed remote command surface; the webview cannot choose a host or command
 
-## Workspace profiles direction
+## Workspace profile
 
-The current release is one compiled workspace: `buzz.nilor.cool`, the
-`buzz-control-tower` and `mos-boston` channels, and one fixed Doha fleet
-collector. Changing Buzz Desktop's selected relay does not change Control
-Tower's source.
+Since 0.3.0 nothing observable is compiled in. One runtime workspace profile
+(`~/.config/control-tower/workspace.json`, override with
+`$CONTROL_TOWER_WORKSPACE`) binds the visible workspace name, relay URL,
+authorized channels and authors, optional fixed runtime collectors, and the
+optional local runtime target. Native code loads and validates the profile on
+every refresh; the webview receives only the validated result and can never
+supply a relay, host, or command itself. The deterministic `tower` CLI
+(`scripts/tower.mjs`, `docs/ONBOARDING.md`) edits the profile atomically with
+the same validation rules, so onboarding a new relay or channel is code
+execution rather than agent work. On first launch the compiled-era nilor
+workspace is written out as the initial profile.
 
-The next connection milestone is explicit workspace profiles. Each profile
-will bind a visible name, relay URL, authorized channels and authors, and one
-or more fixed runtime collectors. One installation can then switch between
-profiles—and later combine authorized profiles—while preserving separate
-relay/channel authorization. The active workspace and relay must always be
-visible; Tower must never silently infer a relay switch from Buzz Desktop.
+The header always shows the active workspace and relay host; Tower never
+silently infers a relay switch from Buzz Desktop.
+
+The next connection milestone is multiple named profiles: switching between
+—and later combining—authorized workspaces in one installation while
+preserving separate relay/channel authorization.
 
 No long-lived private key belongs in application configuration, logs, or web
 storage.

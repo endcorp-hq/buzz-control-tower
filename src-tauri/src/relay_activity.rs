@@ -32,7 +32,7 @@ pub struct RelayActivityPage {
     pub messages: Vec<RelayMessage>,
 }
 
-fn http_query_url(relay_url: &str) -> Result<String, String> {
+pub(crate) fn http_query_url(relay_url: &str) -> Result<String, String> {
     let mut parsed =
         Url::parse(relay_url.trim()).map_err(|error| format!("invalid relay URL: {error}"))?;
     match parsed.scheme() {

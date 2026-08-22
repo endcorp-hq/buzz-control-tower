@@ -85,6 +85,7 @@ export type TowerSnapshot = {
   generatedAt: string;
   viewerName: string;
   workspaceName: string;
+  relayUrl?: string;
   source: "fixture" | "relay" | "runtime";
   channels: Channel[];
 };
