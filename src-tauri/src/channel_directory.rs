@@ -60,7 +60,7 @@ fn bounded_name(value: &str) -> Option<String> {
     Some(trimmed.chars().take(MAX_NAME_CHARS).collect())
 }
 
-fn tag_value<'a>(event: &'a Event, key: &str) -> Option<&'a str> {
+pub(crate) fn tag_value<'a>(event: &'a Event, key: &str) -> Option<&'a str> {
     event.tags.iter().find_map(|tag| {
         let fields = tag.as_slice();
         if fields.first().is_some_and(|field| field == key) {

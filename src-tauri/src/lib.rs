@@ -1,4 +1,5 @@
 mod channel_directory;
+mod channel_telemetry;
 mod device_identity;
 mod local_workstream;
 mod relay_activity;
@@ -39,6 +40,18 @@ async fn load_channel_activity(
         limit,
     )
     .await
+}
+
+#[tauri::command]
+async fn load_channel_telemetry(
+    state: State<'_, device_identity::DeviceIdentityStore>,
+    relay_url: String,
+    channel_id: String,
+    author_pubkeys: Vec<String>,
+) -> Result<channel_telemetry::RelayTelemetryPage, String> {
+    let (keys, _) = state.keys()?;
+    channel_telemetry::load_channel_telemetry(&keys, &relay_url, &channel_id, &author_pubkeys)
+        .await
 }
 
 #[tauri::command]
@@ -109,6 +122,7 @@ pub fn run() {
             platform,
             get_device_identity,
             load_channel_activity,
+            load_channel_telemetry,
             load_local_workstream,
             load_fleet_workstreams,
             load_workspace_state,
