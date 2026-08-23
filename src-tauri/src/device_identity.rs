@@ -61,6 +61,29 @@ impl DeviceIdentityStore {
     pub fn keys(&self) -> Result<(Keys, bool), String> {
         self.resolve_with(load_or_create_device_keys)
     }
+
+    fn import_with(
+        &self,
+        secret: &str,
+        persist: impl FnOnce(&Keys) -> Result<(), String>,
+    ) -> Result<Keys, String> {
+        let keys = Keys::parse(secret.trim())
+            .map_err(|error| format!("parse imported identity: {error}"))?;
+        persist(&keys)?;
+        let mut cache = self
+            .inner
+            .lock()
+            .map_err(|_| "device identity cache lock is poisoned".to_string())?;
+        *cache = CachedDeviceKeys::Ready(keys.clone(), false);
+        Ok(keys)
+    }
+
+    /// Replace this install's identity with a key the operator already owns.
+    /// The secret is persisted to the same keyring slot as a generated device
+    /// key, so every downstream read-auth path picks it up unchanged.
+    pub fn import(&self, secret: &str) -> Result<Keys, String> {
+        self.import_with(secret, persist_device_keys)
+    }
 }
 
 pub fn public_identity(keys: &Keys, created: bool) -> DeviceIdentity {
@@ -99,6 +122,22 @@ pub fn load_or_create_device_keys() -> Result<(Keys, bool), String> {
 
 #[cfg(not(feature = "system-keyring"))]
 pub fn load_or_create_device_keys() -> Result<(Keys, bool), String> {
+    Err("this build does not include system-keyring support".to_string())
+}
+
+#[cfg(feature = "system-keyring")]
+fn persist_device_keys(keys: &Keys) -> Result<(), String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+        .map_err(|error| format!("open device keyring entry: {error}"))?;
+    let secret = Zeroizing::new(keys.secret_key().to_secret_hex());
+    entry
+        .set_password(secret.as_str())
+        .map_err(|error| format!("store imported identity in system keyring: {error}"))?;
+    Ok(())
+}
+
+#[cfg(not(feature = "system-keyring"))]
+fn persist_device_keys(_keys: &Keys) -> Result<(), String> {
     Err("this build does not include system-keyring support".to_string())
 }
 
@@ -141,6 +180,77 @@ mod tests {
 
         assert_eq!(calls.get(), 1);
         assert_eq!(first.0.public_key(), second.0.public_key());
+    }
+
+    #[test]
+    fn import_replaces_the_cached_identity_without_reloading() {
+        let store = DeviceIdentityStore::default();
+        let owner = Keys::generate();
+        let persisted = Cell::new(false);
+
+        let imported = store
+            .import_with(&owner.secret_key().to_secret_hex(), |_| {
+                persisted.set(true);
+                Ok(())
+            })
+            .expect("import");
+        assert!(persisted.get());
+        assert_eq!(imported.public_key(), owner.public_key());
+
+        let (cached, created) = store
+            .resolve_with(|| Err("must not reload after import".to_string()))
+            .expect("cached identity");
+        assert_eq!(cached.public_key(), owner.public_key());
+        assert!(!created);
+    }
+
+    #[test]
+    fn import_accepts_bech32_and_trims_whitespace() {
+        use nostr::nips::nip19::ToBech32;
+
+        let store = DeviceIdentityStore::default();
+        let owner = Keys::generate();
+        let nsec = owner.secret_key().to_bech32().expect("bech32 secret");
+
+        let imported = store
+            .import_with(&format!("  {nsec}\n"), |_| Ok(()))
+            .expect("import nsec");
+        assert_eq!(imported.public_key(), owner.public_key());
+    }
+
+    #[test]
+    fn import_rejects_garbage_and_leaves_the_cache_untouched() {
+        let store = DeviceIdentityStore::default();
+
+        let error = store
+            .import_with("not-a-key", |_| panic!("must not persist garbage"))
+            .unwrap_err();
+        assert!(error.starts_with("parse imported identity"));
+
+        let fallback = Keys::generate();
+        let (keys, _) = store
+            .resolve_with(|| Ok((fallback.clone(), true)))
+            .expect("loader still runs");
+        assert_eq!(keys.public_key(), fallback.public_key());
+    }
+
+    #[test]
+    fn import_propagates_a_persist_failure_before_caching() {
+        let store = DeviceIdentityStore::default();
+        let owner = Keys::generate();
+
+        let error = store
+            .import_with(&owner.secret_key().to_secret_hex(), |_| {
+                Err("keyring write denied".to_string())
+            })
+            .unwrap_err();
+        assert_eq!(error, "keyring write denied");
+
+        let fallback = Keys::generate();
+        let (keys, _) = store
+            .resolve_with(|| Ok((fallback.clone(), true)))
+            .expect("loader still runs");
+        assert_eq!(keys.public_key(), fallback.public_key());
     }
 
     #[test]

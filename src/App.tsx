@@ -114,6 +114,7 @@ function App() {
     return (
       <Onboarding
         deviceIdentity={deviceIdentity}
+        onIdentityChange={setDeviceIdentity}
         onComplete={() => setRefreshVersion((version) => version + 1)}
       />
     );

@@ -22,6 +22,16 @@ fn get_device_identity(
 }
 
 #[tauri::command]
+fn import_device_identity(
+    state: State<'_, device_identity::DeviceIdentityStore>,
+    secret: String,
+) -> Result<device_identity::DeviceIdentity, String> {
+    let secret = zeroize::Zeroizing::new(secret);
+    let keys = state.import(secret.as_str())?;
+    Ok(device_identity::public_identity(&keys, false))
+}
+
+#[tauri::command]
 async fn load_channel_activity(
     state: State<'_, device_identity::DeviceIdentityStore>,
     relay_url: String,
@@ -121,6 +131,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             platform,
             get_device_identity,
+            import_device_identity,
             load_channel_activity,
             load_channel_telemetry,
             load_local_workstream,

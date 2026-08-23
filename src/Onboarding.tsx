@@ -2,9 +2,10 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { Hash, KeyRound, Radio, RefreshCw, Sparkles, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChannelDirectory, ChannelSummary } from "./dataSource";
-import type { DeviceIdentityState } from "./deviceIdentity";
+import { importDeviceIdentity, type DeviceIdentityState } from "./deviceIdentity";
 
 type OnboardingPhase = "relay" | "authorize" | "channels";
+type IdentityMode = "own" | "device";
 
 function relayHost(relayUrl: string) {
   try {
@@ -19,8 +20,11 @@ function isAuthorizationError(message: string) {
 }
 
 /**
- * First-run journey: pick a relay, get the read-only device key admitted,
- * pick a channel. Everything it does is a deterministic native command —
+ * First-run journey: pick a relay and an identity, clear relay auth, pick a
+ * channel. Owners paste their existing Buzz key (already a relay member, so
+ * the admission wait disappears); everyone else generates a read-only device
+ * key and waits for an operator to admit it. Everything it does is a
+ * deterministic native command — `import_device_identity`,
  * `list_relay_channels`, `discover_channel_directory`, and a
  * `create_workspace_profile` that refuses to touch an existing profile.
  * Agents are never listed here because they are discovered live on every
@@ -28,14 +32,18 @@ function isAuthorizationError(message: string) {
  */
 export function Onboarding({
   deviceIdentity,
+  onIdentityChange,
   onComplete,
 }: {
   deviceIdentity: DeviceIdentityState;
+  onIdentityChange: (state: DeviceIdentityState) => void;
   onComplete: () => void;
 }) {
   const [phase, setPhase] = useState<OnboardingPhase>("relay");
   const [relayUrl, setRelayUrl] = useState("wss://");
   const [viewerName, setViewerName] = useState("");
+  const [identityMode, setIdentityMode] = useState<IdentityMode>("own");
+  const [ownerSecret, setOwnerSecret] = useState("");
   const [channels, setChannels] = useState<ChannelSummary[]>([]);
   const [manualChannelId, setManualChannelId] = useState("");
   const [error, setError] = useState<string>();
@@ -112,6 +120,26 @@ export function Onboarding({
     await finish(channel);
   };
 
+  // Import the pasted owner key, then land it in App state so the header and
+  // security panel reflect the new identity immediately. Returns false (with
+  // the error surfaced inline) instead of throwing so submit handlers can
+  // simply stop.
+  const importOwnerKey = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const identity = await importDeviceIdentity(ownerSecret.trim());
+      onIdentityChange({ status: "ready", identity });
+      setOwnerSecret("");
+      return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const copyDeviceKey = async () => {
     if (deviceIdentity.status !== "ready") return;
     try {
@@ -153,7 +181,10 @@ export function Onboarding({
             className="onboarding-form"
             onSubmit={(event) => {
               event.preventDefault();
-              void connect(relayUrl.trim());
+              void (async () => {
+                if (identityMode === "own" && !(await importOwnerKey())) return;
+                await connect(relayUrl.trim());
+              })();
             }}
           >
             <label>
@@ -173,9 +204,50 @@ export function Onboarding({
                 placeholder="Shown in the header"
               />
             </label>
-            <button type="submit" disabled={busy || !isTauri()}>
+            <div className="onboarding-identity">
+              <span>Identity</span>
+              <div className="onboarding-choice">
+                <button
+                  type="button"
+                  className={identityMode === "own" ? "selected" : ""}
+                  onClick={() => setIdentityMode("own")}
+                >
+                  Use my Buzz identity
+                  <span>Paste the key you already use — no relay admission wait</span>
+                </button>
+                <button
+                  type="button"
+                  className={identityMode === "device" ? "selected" : ""}
+                  onClick={() => setIdentityMode("device")}
+                >
+                  Create a device key
+                  <span>Fresh read-only key an operator must admit first</span>
+                </button>
+              </div>
+              {identityMode === "own" && (
+                <label>
+                  <span>Private key</span>
+                  <input
+                    type="password"
+                    value={ownerSecret}
+                    onChange={(event) => setOwnerSecret(event.target.value)}
+                    placeholder="nsec1… or 64-char hex"
+                  />
+                </label>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={busy || !isTauri() || (identityMode === "own" && !ownerSecret.trim())}
+            >
               {busy ? "Connecting…" : "Connect"}
             </button>
+            {identityMode === "own" && (
+              <p className="onboarding-note">
+                Your key is stored in the system keychain, never on disk in plaintext. Control
+                Tower only signs relay auth with it — it never posts messages.
+              </p>
+            )}
           </form>
         )}
 
@@ -204,6 +276,29 @@ export function Onboarding({
             </div>
             <p className="onboarding-note">
               The key never signs messages — it only authenticates signed, read-only queries.
+            </p>
+            <form
+              className="onboarding-manual"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void (async () => {
+                  if (await importOwnerKey()) await connect(activeRelay.current);
+                })();
+              }}
+            >
+              <input
+                type="password"
+                value={ownerSecret}
+                onChange={(event) => setOwnerSecret(event.target.value)}
+                placeholder="Or paste your own key (nsec1… / hex)"
+              />
+              <button type="submit" disabled={busy || !ownerSecret.trim()}>
+                Use my key
+              </button>
+            </form>
+            <p className="onboarding-note">
+              Already a member of this relay? Pasting your own Buzz key replaces this install's
+              device key and skips the admission wait.
             </p>
           </div>
         )}
