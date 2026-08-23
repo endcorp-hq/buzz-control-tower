@@ -69,9 +69,10 @@ fn start_observer_stream(
     identity: State<'_, device_identity::DeviceIdentityStore>,
     streams: State<'_, observer_stream::ObserverStreamStore>,
     relay_url: String,
+    channels: Vec<String>,
 ) -> Result<(), String> {
     let (keys, _) = identity.keys()?;
-    streams.ensure_started(keys, relay_url)
+    streams.ensure_started(keys, relay_url, channels)
 }
 
 #[tauri::command]

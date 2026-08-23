@@ -772,7 +772,10 @@ class CompanionDataSource implements TowerDataSource {
     // read whatever it has accumulated. Both are best-effort: their failure
     // degrades to telemetry-only cards.
     const [, observerPage] = await Promise.allSettled([
-      invoke<void>("start_observer_stream", { relayUrl: profile.relayUrl }),
+      invoke<void>("start_observer_stream", {
+        relayUrl: profile.relayUrl,
+        channels: profile.channels.map((channel) => channel.id),
+      }),
       invoke<ObserverStreamsPage>("load_observer_streams"),
     ]);
     const observerStreams = observerStreamsByAgent(
