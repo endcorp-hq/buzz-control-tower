@@ -34,6 +34,7 @@ const NIP44_MAX_CONTENT_LEN: usize = 87_472;
 const MAX_PLAINTEXT_BYTES: usize = 65_535;
 
 const MAX_AGENTS: usize = 64;
+const MAX_CHANNEL_FILTERS: usize = 32;
 const MAX_ENTRIES_PER_AGENT: usize = 200;
 const MAX_LIVE_TEXT_BYTES: usize = 16_384;
 const MAX_THOUGHT_BYTES: usize = 8_192;
@@ -108,6 +109,7 @@ pub struct ObserverStreamsPage {
 struct StoreInner {
     relay_url: String,
     identity_pubkey: String,
+    channels: Vec<String>,
     connected: bool,
     last_error: Option<String>,
     agents: HashMap<String, AgentStream>,
@@ -121,21 +123,40 @@ pub struct ObserverStreamStore {
 
 impl ObserverStreamStore {
     /// Ensure a background subscription task is running for `relay_url` under
-    /// `keys`. Idempotent: a live task for the same relay and identity is left
-    /// alone; anything else is superseded by bumping the generation.
-    pub fn ensure_started(&self, keys: Keys, relay_url: String) -> Result<(), String> {
+    /// `keys`, watching `channels`. Idempotent: a live task for the same
+    /// relay, identity, and channel set is left alone; anything else is
+    /// superseded by bumping the generation.
+    pub fn ensure_started(
+        &self,
+        keys: Keys,
+        relay_url: String,
+        channels: Vec<String>,
+    ) -> Result<(), String> {
         let pubkey = keys.public_key().to_hex();
+        let mut channels: Vec<String> = channels
+            .into_iter()
+            .map(|channel| channel.trim().to_string())
+            .filter(|channel| !channel.is_empty())
+            .take(MAX_CHANNEL_FILTERS)
+            .collect();
+        channels.sort();
+        channels.dedup();
         {
             let mut inner = self
                 .inner
                 .lock()
                 .map_err(|_| "observer stream lock is poisoned".to_string())?;
             let generation = self.generation.load(Ordering::SeqCst);
-            if generation != 0 && inner.relay_url == relay_url && inner.identity_pubkey == pubkey {
+            if generation != 0
+                && inner.relay_url == relay_url
+                && inner.identity_pubkey == pubkey
+                && inner.channels == channels
+            {
                 return Ok(());
             }
             inner.relay_url = relay_url.clone();
             inner.identity_pubkey = pubkey;
+            inner.channels = channels.clone();
             inner.connected = false;
             inner.last_error = None;
             inner.agents.clear();
@@ -143,7 +164,7 @@ impl ObserverStreamStore {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let store = self.clone();
         tauri::async_runtime::spawn(async move {
-            run_stream(store, keys, relay_url, generation).await;
+            run_stream(store, keys, relay_url, channels, generation).await;
         });
         Ok(())
     }
@@ -578,10 +599,16 @@ fn append_capped(buffer: &mut String, text: &str, cap: usize) {
 // Relay subscription: connect, NIP-42 auth, REQ, decrypt, apply.
 // ---------------------------------------------------------------------------
 
-async fn run_stream(store: ObserverStreamStore, keys: Keys, relay_url: String, generation: u64) {
+async fn run_stream(
+    store: ObserverStreamStore,
+    keys: Keys,
+    relay_url: String,
+    channels: Vec<String>,
+    generation: u64,
+) {
     let mut backoff = RECONNECT_MIN_SECS;
     while store.generation.load(Ordering::SeqCst) == generation {
-        match connect_and_stream(&store, &keys, &relay_url, generation).await {
+        match connect_and_stream(&store, &keys, &relay_url, &channels, generation).await {
             Ok(()) => backoff = RECONNECT_MIN_SECS,
             Err(error) => {
                 store.set_error(generation, error);
@@ -603,6 +630,7 @@ async fn connect_and_stream(
     store: &ObserverStreamStore,
     keys: &Keys,
     relay_url: &str,
+    channels: &[String],
     generation: u64,
 ) -> Result<(), String> {
     let (mut ws, _) = tokio_tungstenite::connect_async(relay_url)
@@ -611,11 +639,9 @@ async fn connect_and_stream(
 
     authenticate(&mut ws, keys, relay_url).await?;
 
-    let filter = json!({
-        "kinds": [OBSERVER_FRAME_KIND, SHARED_OBSERVER_FRAME_KIND],
-        "#p": [keys.public_key().to_hex()],
-    });
-    send_json(&mut ws, &json!(["REQ", SUBSCRIPTION_ID, filter])).await?;
+    let mut req = vec![json!("REQ"), json!(SUBSCRIPTION_ID)];
+    req.extend(subscription_filters(&keys.public_key().to_hex(), channels));
+    send_json(&mut ws, &Value::Array(req)).await?;
     store.set_connected(generation, true);
 
     loop {
@@ -716,6 +742,25 @@ async fn send_json(ws: &mut WsStream, value: &Value) -> Result<(), String> {
     ws.send(tokio_tungstenite::tungstenite::Message::Text(text))
         .await
         .map_err(|error| format!("relay send failed: {error}"))
+}
+
+/// Two filters: owner-scoped kind-24200 frames route globally and are matched
+/// by `#p` alone, while channel-scoped kind-24201 copies ride the relay's
+/// channel fan-out index — a subscription only matches them when it names the
+/// channel in `#h` (verified live against buzz.nilor.cool 2026-08-23).
+fn subscription_filters(pubkey_hex: &str, channels: &[String]) -> Vec<Value> {
+    let mut filters = vec![json!({
+        "kinds": [OBSERVER_FRAME_KIND],
+        "#p": [pubkey_hex],
+    })];
+    if !channels.is_empty() {
+        filters.push(json!({
+            "kinds": [SHARED_OBSERVER_FRAME_KIND],
+            "#p": [pubkey_hex],
+            "#h": channels,
+        }));
+    }
+    filters
 }
 
 fn handle_relay_text(store: &ObserverStreamStore, keys: &Keys, generation: u64, text: &str) {
@@ -924,6 +969,23 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].kind, "message");
         assert_eq!(entries[0].detail, "fix the bug");
+    }
+
+    #[test]
+    fn subscription_filters_split_owner_and_channel_lanes() {
+        let filters = subscription_filters("ab".repeat(32).as_str(), &["chan-1".to_string()]);
+        assert_eq!(filters.len(), 2);
+        assert_eq!(filters[0]["kinds"][0], OBSERVER_FRAME_KIND);
+        assert!(
+            filters[0].get("#h").is_none(),
+            "24200 frames carry no h tag"
+        );
+        assert_eq!(filters[1]["kinds"][0], SHARED_OBSERVER_FRAME_KIND);
+        assert_eq!(filters[1]["#h"][0], "chan-1");
+        assert_eq!(filters[1]["#p"][0], filters[0]["#p"][0]);
+
+        let no_channels = subscription_filters("ab", &[]);
+        assert_eq!(no_channels.len(), 1, "no channel filter without channels");
     }
 
     #[test]
