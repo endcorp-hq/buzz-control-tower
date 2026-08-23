@@ -184,6 +184,43 @@ export type RelayTelemetryPage = {
 
 export type TelemetryPages = Map<string, RelayTelemetryPage>;
 
+export type RichEntry = {
+  id: string;
+  at: string;
+  kind: string;
+  title: string;
+  detail: string;
+  status?: string | null;
+  parameters: Array<{ label: string; value: string }>;
+  result?: string | null;
+};
+
+export type ObserverAgentStream = {
+  agentPubkey: string;
+  channelId?: string | null;
+  sessionId?: string | null;
+  turnId?: string | null;
+  updatedAt: number;
+  liveText: string;
+  liveThought: string;
+  entries: RichEntry[];
+};
+
+export type ObserverStreamsPage = {
+  relayUrl: string;
+  connected: boolean;
+  lastError?: string | null;
+  agents: ObserverAgentStream[];
+};
+
+export type ObserverStreams = Map<string, ObserverAgentStream>;
+
+export function observerStreamsByAgent(page: ObserverStreamsPage | undefined): ObserverStreams {
+  const byAgent: ObserverStreams = new Map();
+  for (const agent of page?.agents ?? []) byAgent.set(agent.agentPubkey, agent);
+  return byAgent;
+}
+
 export type RuntimeActivity = {
   id: string;
   at: string;
@@ -326,6 +363,32 @@ function activityFromTelemetry(telemetry: AgentTelemetry): ActivityEvent[] {
     .reverse();
 }
 
+// Decrypted rich-lane entries arrive newest-first from the backend and are
+// already shaped like ActivityEvents; normalize kinds/status and clock-format
+// the timestamps.
+function activityFromObserverStream(stream: ObserverAgentStream): ActivityEvent[] {
+  return stream.entries.map((entry): ActivityEvent => ({
+    id: `${stream.agentPubkey}-rich-${entry.id}`,
+    at: entry.at ? clockTime(entry.at) : "—",
+    kind: activityEventKind(entry.kind),
+    title: entry.title,
+    detail: entry.detail,
+    status: activityEventStatus(entry.status),
+    parameters: entry.parameters.length > 0 ? entry.parameters : undefined,
+    result: entry.result ?? undefined,
+  }));
+}
+
+function channelObserverStream(
+  observerStreams: ObserverStreams | undefined,
+  channelId: string,
+  pubkey: string,
+): ObserverAgentStream | undefined {
+  const stream = observerStreams?.get(pubkey);
+  if (!stream) return undefined;
+  return !stream.channelId || stream.channelId === channelId ? stream : undefined;
+}
+
 // A relay-derived agent card. A member with no signed events in the window is
 // still rendered, as a quiet idle card, so the discovered roster never shrinks
 // to just the recent speakers. Agent-published work-status telemetry, when
@@ -336,10 +399,19 @@ function relayAgentCard(
   messages: RelayMessage[],
   presentation: WorkspacePresentation,
   telemetry?: AgentTelemetry,
+  observer?: ObserverAgentStream,
 ) {
   const newest = messages.at(-1);
   const card = telemetry ? TELEMETRY_STATUS_CARD[telemetry.status] : undefined;
-  const telemetryActivity = telemetry ? activityFromTelemetry(telemetry) : [];
+  // The decrypted rich lane supersedes the redacted telemetry activity list
+  // (every telemetry title also exists as a richer entry); telemetry still
+  // owns card status, model, and timings — it is the agent's own summary.
+  const richActivity = observer ? activityFromObserverStream(observer) : [];
+  const telemetryActivity = richActivity.length > 0
+    ? richActivity
+    : telemetry
+      ? activityFromTelemetry(telemetry)
+      : [];
   const newestTelemetry = telemetryActivity[0];
   const elapsed = telemetry?.turnStartedAt
     ? telemetry.status === "working"
@@ -370,6 +442,8 @@ function relayAgentCard(
     head: "Not exposed",
     helperCount: 0,
     activity: [...telemetryActivity, ...[...messages].reverse().map(activityFromMessage)],
+    liveText: observer?.liveText || undefined,
+    liveThought: observer?.liveThought || undefined,
     context: [],
     evidence: [],
     artifacts: [],
@@ -389,6 +463,7 @@ export function relayPagesSnapshot(
   presentation: WorkspacePresentation = DEFAULT_PRESENTATION,
   rosters?: ChannelRosters,
   telemetryPages?: TelemetryPages,
+  observerStreams?: ObserverStreams,
 ): TowerSnapshot {
   const channels: TowerSnapshot["channels"] = [];
   for (const page of pages) {
@@ -400,7 +475,8 @@ export function relayPagesSnapshot(
     }
     const agents = pubkeys.map((pubkey) =>
       relayAgentCard(page.channelId, pubkey, byAuthor.get(pubkey) ?? [], presentation,
-        channelTelemetry(telemetryPages, page.channelId, pubkey)));
+        channelTelemetry(telemetryPages, page.channelId, pubkey),
+        channelObserverStream(observerStreams, page.channelId, pubkey)));
     channels.push({
       id: page.channelId,
       name: meta.name,
@@ -466,6 +542,7 @@ export function runtimePagesSnapshot(
   rosters?: ChannelRosters,
   relayPages?: Map<string, RelayActivityPage>,
   telemetryPages?: TelemetryPages,
+  observerStreams?: ObserverStreams,
 ): TowerSnapshot {
   const channels = new Map<string, TowerSnapshot["channels"][number]>();
   const ensureChannel = (channelId: string) => {
@@ -573,7 +650,8 @@ export function runtimePagesSnapshot(
       phase: "Relay-discovered",
       agents: quiet.map((pubkey) =>
         relayAgentCard(channelId, pubkey, byAuthor.get(pubkey) ?? [], presentation,
-          channelTelemetry(telemetryPages, channelId, pubkey))),
+          channelTelemetry(telemetryPages, channelId, pubkey),
+          channelObserverStream(observerStreams, channelId, pubkey))),
     });
   }
 
@@ -690,6 +768,17 @@ class CompanionDataSource implements TowerDataSource {
     const since = Math.floor(Date.now() / 1000) - 24 * 60 * 60;
     const hasCollectors = (profile.collectors?.length ?? 0) > 0;
 
+    // Keep the live encrypted rich-lane subscription running (idempotent) and
+    // read whatever it has accumulated. Both are best-effort: their failure
+    // degrades to telemetry-only cards.
+    const [, observerPage] = await Promise.allSettled([
+      invoke<void>("start_observer_stream", { relayUrl: profile.relayUrl }),
+      invoke<ObserverStreamsPage>("load_observer_streams"),
+    ]);
+    const observerStreams = observerStreamsByAgent(
+      observerPage.status === "fulfilled" ? observerPage.value : undefined,
+    );
+
     const [localRuntime, remoteFleet] = await Promise.allSettled([
       profile.localRuntime
         ? invoke<RuntimeWorkstreamPage>("load_local_workstream", {
@@ -796,7 +885,8 @@ class CompanionDataSource implements TowerDataSource {
       ];
       return {
         snapshot: runtimePagesSnapshot(
-          sources, remoteDocument?.errors, presentation, rosters, relayPages, telemetryPages),
+          sources, remoteDocument?.errors, presentation, rosters, relayPages, telemetryPages,
+          observerStreams),
         connection: {
           state: "connected",
           label: hasRemote && hasLocal ? "Fleet + local" : hasRemote ? "Agent fleet" : "Local runtime",
@@ -807,7 +897,8 @@ class CompanionDataSource implements TowerDataSource {
 
     if (relayPages.size > 0) {
       return {
-        snapshot: relayPagesSnapshot([...relayPages.values()], presentation, rosters, telemetryPages),
+        snapshot: relayPagesSnapshot(
+          [...relayPages.values()], presentation, rosters, telemetryPages, observerStreams),
         connection: {
           state: "connected",
           label: "Public relay",

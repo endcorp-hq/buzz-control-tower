@@ -156,7 +156,8 @@ pub(crate) async fn post_signed_query(
     filters: &serde_json::Value,
 ) -> Result<Vec<Event>, String> {
     let query_url = http_query_url(relay_url)?;
-    let body = serde_json::to_vec(filters).map_err(|error| format!("encode relay query: {error}"))?;
+    let body =
+        serde_json::to_vec(filters).map_err(|error| format!("encode relay query: {error}"))?;
     let authorization = sign_nip98(device_keys, &query_url, &body)?;
     let response = reqwest::Client::builder()
         .timeout(Duration::from_secs(12))

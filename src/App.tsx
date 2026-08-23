@@ -369,6 +369,22 @@ function LiveView({ events, agent }: { events: ActivityEvent[]; agent: AgentTurn
   return (
     <>
       <PanelHeading eyebrow="Turn stream" title="Live activity" description="A safe semantic view of this turn, including work performed by nested helpers." />
+      {(agent.liveText || agent.liveThought) && (
+        <div className="live-stream">
+          {agent.liveText && (
+            <div className="live-stream-block">
+              <span className="live-stream-label">Streaming reply</span>
+              <pre className="live-stream-text">{agent.liveText}</pre>
+            </div>
+          )}
+          {agent.liveThought && (
+            <details className="live-stream-block live-stream-thought">
+              <summary className="live-stream-label">Reasoning stream</summary>
+              <pre className="live-stream-text">{agent.liveThought}</pre>
+            </details>
+          )}
+        </div>
+      )}
       {events.length ? (
         <div className="timeline">
           {events.map((event, index) => (

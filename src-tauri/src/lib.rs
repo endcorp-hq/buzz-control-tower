@@ -2,6 +2,7 @@ mod channel_directory;
 mod channel_telemetry;
 mod device_identity;
 mod local_workstream;
+mod observer_stream;
 mod relay_activity;
 mod remote_workstream;
 mod workspace_profile;
@@ -60,8 +61,24 @@ async fn load_channel_telemetry(
     author_pubkeys: Vec<String>,
 ) -> Result<channel_telemetry::RelayTelemetryPage, String> {
     let (keys, _) = state.keys()?;
-    channel_telemetry::load_channel_telemetry(&keys, &relay_url, &channel_id, &author_pubkeys)
-        .await
+    channel_telemetry::load_channel_telemetry(&keys, &relay_url, &channel_id, &author_pubkeys).await
+}
+
+#[tauri::command]
+fn start_observer_stream(
+    identity: State<'_, device_identity::DeviceIdentityStore>,
+    streams: State<'_, observer_stream::ObserverStreamStore>,
+    relay_url: String,
+) -> Result<(), String> {
+    let (keys, _) = identity.keys()?;
+    streams.ensure_started(keys, relay_url)
+}
+
+#[tauri::command]
+fn load_observer_streams(
+    streams: State<'_, observer_stream::ObserverStreamStore>,
+) -> Result<observer_stream::ObserverStreamsPage, String> {
+    streams.snapshot()
 }
 
 #[tauri::command]
@@ -128,11 +145,14 @@ fn create_workspace_profile(
 pub fn run() {
     tauri::Builder::default()
         .manage(device_identity::DeviceIdentityStore::default())
+        .manage(observer_stream::ObserverStreamStore::default())
         .invoke_handler(tauri::generate_handler![
             platform,
             get_device_identity,
             import_device_identity,
             load_channel_activity,
+            start_observer_stream,
+            load_observer_streams,
             load_channel_telemetry,
             load_local_workstream,
             load_fleet_workstreams,
