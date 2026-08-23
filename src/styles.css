@@ -298,6 +298,13 @@ button { color: inherit; }
 .onboarding-form button, .onboarding-actions button, .onboarding-manual button, .onboarding-channel-list button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 13px; border: 1px solid rgba(246, 184, 74, .25); border-radius: 8px; color: var(--amber); background: var(--amber-soft); font-size: 12px; cursor: pointer; }
 .onboarding-form button:hover:not(:disabled), .onboarding-actions button:hover:not(:disabled), .onboarding-manual button:hover:not(:disabled) { border-color: rgba(246, 184, 74, .5); }
 .onboarding-form button:disabled, .onboarding-actions button:disabled, .onboarding-manual button:disabled, .onboarding-channel-list button:disabled { opacity: .5; cursor: default; }
+.onboarding-identity { display: flex; flex-direction: column; gap: 8px; font-size: 11px; color: var(--muted); }
+.onboarding-identity label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--muted); }
+.onboarding-choice { display: flex; gap: 8px; }
+.onboarding-choice button { flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-high); color: #e7e9ef; font-size: 12px; cursor: pointer; text-align: left; }
+.onboarding-choice button span { color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+.onboarding-choice button.selected { border-color: rgba(246, 184, 74, .45); background: var(--amber-soft); color: var(--amber); }
+.onboarding-choice button.selected span { color: rgba(246, 184, 74, .72); }
 .onboarding-authorize, .onboarding-channels { display: flex; flex-direction: column; gap: 12px; }
 .onboarding-authorize p, .onboarding-channels p { margin: 0; color: #c6c9d2; font-size: 12px; line-height: 1.55; }
 .onboarding-key { padding: 10px 12px; border: 1px dashed rgba(246, 184, 74, .3); border-radius: 8px; color: var(--amber); background: rgba(246, 184, 74, .05); font: 10px var(--mono); word-break: break-all; }
