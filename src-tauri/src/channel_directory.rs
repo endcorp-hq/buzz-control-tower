@@ -181,7 +181,11 @@ pub async fn discover_channel(
         .iter()
         .find_map(|event| {
             let parsed = parse_member_roles(event, channel_id);
-            if parsed.is_empty() { None } else { Some(parsed) }
+            if parsed.is_empty() {
+                None
+            } else {
+                Some(parsed)
+            }
         })
         .unwrap_or_default();
     if members.is_empty() {
@@ -214,7 +218,11 @@ pub async fn discover_channel(
             continue;
         }
         let pubkey = event.pubkey.to_hex();
-        if member_pubkeys.contains(&pubkey) && !profile_names.iter().any(|(existing, _)| *existing == pubkey) {
+        if member_pubkeys.contains(&pubkey)
+            && !profile_names
+                .iter()
+                .any(|(existing, _)| *existing == pubkey)
+        {
             if let Some(name) = profile_display_name(event) {
                 profile_names.push((pubkey, name));
             }
@@ -232,7 +240,12 @@ pub async fn discover_channel(
         .map(|(pubkey, role)| {
             let is_agent = role == "bot" || agent_pubkeys.contains(&pubkey);
             let name = lookup(&profile_names, &pubkey).or_else(|| lookup(&agent_names, &pubkey));
-            DirectoryMember { pubkey, name, role, is_agent }
+            DirectoryMember {
+                pubkey,
+                name,
+                role,
+                is_agent,
+            }
         })
         .collect();
 
@@ -286,7 +299,12 @@ mod tests {
     #[test]
     fn rejects_non_uuid_and_wrong_kind_summaries() {
         let keys = Keys::generate();
-        let bad_id = signed(&keys, 39_000, vec![vec!["d".into(), "not-a-uuid".into()]], "");
+        let bad_id = signed(
+            &keys,
+            39_000,
+            vec![vec!["d".into(), "not-a-uuid".into()]],
+            "",
+        );
         assert!(parse_channel_summary(&bad_id).is_none());
         let wrong_kind = signed(&keys, 39_002, vec![vec!["d".into(), CHANNEL.into()]], "");
         assert!(parse_channel_summary(&wrong_kind).is_none());
@@ -319,10 +337,18 @@ mod tests {
     #[test]
     fn reads_display_name_from_profile_content() {
         let keys = Keys::generate();
-        let event = signed(&keys, 0, vec![], r#"{"display_name":"Lucas-Fizz","picture":"x"}"#);
+        let event = signed(
+            &keys,
+            0,
+            vec![],
+            r#"{"display_name":"Lucas-Fizz","picture":"x"}"#,
+        );
         assert_eq!(profile_display_name(&event), Some("Lucas-Fizz".to_string()));
         let fallback = signed(&keys, 0, vec![], r#"{"name":"thor-mos-psc"}"#);
-        assert_eq!(profile_display_name(&fallback), Some("thor-mos-psc".to_string()));
+        assert_eq!(
+            profile_display_name(&fallback),
+            Some("thor-mos-psc".to_string())
+        );
         let invalid = signed(&keys, 0, vec![], "not-json");
         assert_eq!(profile_display_name(&invalid), None);
     }

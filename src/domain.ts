@@ -62,6 +62,8 @@ export type AgentTurn = {
   head: string;
   helperCount: number;
   activity: ActivityEvent[];
+  liveText?: string;
+  liveThought?: string;
   context: ContextSource[];
   evidence: Evidence[];
   artifacts: Artifact[];

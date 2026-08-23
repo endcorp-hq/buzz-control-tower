@@ -356,8 +356,7 @@ mod tests {
         value["errors"][0]["agentName"] = replacement.1.clone().into();
         value["errors"][0]["sourceLabel"] = replacement.2.clone().into();
 
-        let document =
-            parse(&serde_json::to_vec(&value).expect("json")).expect("roster");
+        let document = parse(&serde_json::to_vec(&value).expect("json")).expect("roster");
         assert_eq!(document.errors[0].agent_pubkey, replacement.0);
         assert_eq!(document.errors[0].agent_name, replacement.1);
     }

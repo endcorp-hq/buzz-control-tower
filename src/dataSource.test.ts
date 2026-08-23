@@ -3,6 +3,7 @@ import {
   channelAuthorPubkeys,
   fleetRosterPubkeys,
   mergeChannelRoster,
+  observerStreamsByAgent,
   presentationFromProfile,
   relayPagesSnapshot,
   relaySnapshot,
@@ -11,6 +12,7 @@ import {
   type AgentTelemetry,
   type ChannelDirectory,
   type RelayActivityPage,
+  type ObserverStreamsPage,
   type RelayTelemetryPage,
   type RuntimeWorkstreamPage,
   type WorkspaceProfile,
@@ -602,5 +604,113 @@ describe("companion runtime snapshot", () => {
     expect(agent.status).toBe("idle");
     expect(agent.statusLabel).toBe("Unavailable");
     expect(agent.operation).toContain("stopped");
+  });
+});
+
+describe("companion rich lane", () => {
+  const channelId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  const agentPubkey = "6".repeat(64);
+  const page: RelayActivityPage = {
+    relayUrl: "wss://buzz.example.org",
+    channelId,
+    devicePubkey: "a".repeat(64),
+    messages: [],
+  };
+  const rosters = new Map([[channelId, {
+    authorPubkeys: [agentPubkey],
+    authorNames: new Map<string, string>(),
+    authorRoles: new Map<string, string>(),
+  }]]);
+  const telemetry: AgentTelemetry = {
+    pubkey: agentPubkey,
+    eventCreatedAt: 1_800_000_010,
+    status: "working",
+    model: "opencode/gpt-5.6-sol",
+    turnStartedAt: "2026-01-01T00:00:00Z",
+    activity: [
+      { at: "2026-01-01T00:00:05Z", kind: "tool", title: "Shell command", status: "complete" },
+    ],
+  };
+  const telemetryPages = new Map<string, RelayTelemetryPage>([[channelId, {
+    channelId,
+    statuses: [telemetry],
+  }]]);
+  const observerPage: ObserverStreamsPage = {
+    relayUrl: "wss://buzz.example.org",
+    connected: true,
+    agents: [{
+      agentPubkey,
+      channelId,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      updatedAt: 1_800_000_020,
+      liveText: "Deploying the fix now.",
+      liveThought: "The test failure points at the cache.",
+      entries: [
+        {
+          id: "call-9",
+          at: "2026-01-01T00:00:07Z",
+          kind: "tool",
+          title: "Shell command",
+          detail: "",
+          status: "complete",
+          parameters: [{ label: "command", value: "cargo test" }],
+          result: "ok. 39 passed",
+        },
+        {
+          id: "1-turn-started",
+          at: "2026-01-01T00:00:01Z",
+          kind: "lifecycle",
+          title: "Turn started",
+          detail: "Live encrypted agent stream.",
+          status: "complete",
+          parameters: [],
+        },
+      ],
+    }],
+  };
+
+  it("supersedes telemetry activity with decrypted rich entries and carries the live text", () => {
+    const observerStreams = observerStreamsByAgent(observerPage);
+    const snapshot = relayPagesSnapshot(
+      [page], undefined, rosters, telemetryPages, observerStreams);
+    const agent = snapshot.channels[0].workstreams[0].agents[0];
+
+    // Telemetry still owns status and model; the rich lane owns activity.
+    expect(agent.status).toBe("working");
+    expect(agent.model).toBe("opencode/gpt-5.6-sol");
+    expect(agent.activity.map((event) => event.title)).toEqual([
+      "Shell command",
+      "Turn started",
+    ]);
+    expect(agent.activity[0].parameters).toEqual([
+      { label: "command", value: "cargo test" },
+    ]);
+    expect(agent.activity[0].result).toBe("ok. 39 passed");
+    expect(agent.liveText).toBe("Deploying the fix now.");
+    expect(agent.liveThought).toBe("The test failure points at the cache.");
+  });
+
+  it("does not enrich a card in a different channel than the stream", () => {
+    const otherChannel = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    const otherPage: RelayActivityPage = { ...page, channelId: otherChannel };
+    const otherRosters = new Map([[otherChannel, {
+      authorPubkeys: [agentPubkey],
+      authorNames: new Map<string, string>(),
+      authorRoles: new Map<string, string>(),
+    }]]);
+    const observerStreams = observerStreamsByAgent(observerPage);
+    const snapshot = relayPagesSnapshot(
+      [otherPage], undefined, otherRosters, undefined, observerStreams);
+    const agent = snapshot.channels[0].workstreams[0].agents[0];
+
+    expect(agent.liveText).toBeUndefined();
+    expect(agent.activity).toEqual([]);
+  });
+
+  it("indexes observer streams by agent pubkey", () => {
+    const byAgent = observerStreamsByAgent(observerPage);
+    expect(byAgent.get(agentPubkey)?.liveText).toBe("Deploying the fix now.");
+    expect(observerStreamsByAgent(undefined).size).toBe(0);
   });
 });

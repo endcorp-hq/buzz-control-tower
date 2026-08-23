@@ -266,11 +266,17 @@ mod tests {
             telemetry.turn_started_at.as_deref(),
             Some("2026-08-22T19:00:00Z")
         );
-        assert_eq!(telemetry.updated_at.as_deref(), Some("2026-08-22T19:00:10Z"));
+        assert_eq!(
+            telemetry.updated_at.as_deref(),
+            Some("2026-08-22T19:00:10Z")
+        );
         assert_eq!(telemetry.completed_at, None);
         assert_eq!(telemetry.stop_reason, None);
         assert_eq!(telemetry.activity.len(), 2);
-        assert_eq!(telemetry.activity[1].title.as_deref(), Some("Streaming reply"));
+        assert_eq!(
+            telemetry.activity[1].title.as_deref(),
+            Some("Streaming reply")
+        );
         assert_eq!(telemetry.activity[1].status.as_deref(), Some("running"));
     }
 
@@ -357,7 +363,10 @@ mod tests {
             .expect("title")
             .starts_with("step-5 "));
         for entry in &telemetry.activity {
-            assert_eq!(entry.title.as_deref().expect("title").chars().count(), MAX_TITLE_CHARS);
+            assert_eq!(
+                entry.title.as_deref().expect("title").chars().count(),
+                MAX_TITLE_CHARS
+            );
         }
     }
 

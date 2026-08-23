@@ -137,7 +137,10 @@ pub fn validate(profile: &WorkspaceProfile) -> Result<(), String> {
         }
         channel_ids.push(channel.id.as_str());
         if !valid_name(&channel.name) || channel.description.chars().count() > MAX_NAME * 2 {
-            return Err(format!("channel {} has an invalid name or description", channel.id));
+            return Err(format!(
+                "channel {} has an invalid name or description",
+                channel.id
+            ));
         }
         if channel.authors.len() > MAX_AUTHORS_PER_CHANNEL {
             return Err(format!(
@@ -173,7 +176,10 @@ pub fn validate(profile: &WorkspaceProfile) -> Result<(), String> {
             ));
         }
         if !valid_ssh_host(&collector.ssh_host) {
-            return Err(format!("collector {} has an invalid user@host", collector.label));
+            return Err(format!(
+                "collector {} has an invalid user@host",
+                collector.label
+            ));
         }
         if !valid_collector_command(&collector.command) {
             return Err(format!(
@@ -226,12 +232,10 @@ pub fn load_state() -> Result<WorkspaceState, String> {
     }
     let body = fs::read_to_string(&path)
         .map_err(|error| format!("cannot read the workspace profile: {error}"))?;
-    let profile: WorkspaceProfile = serde_json::from_str(&body).map_err(|error| {
-        format!("workspace profile at {display_path} is not valid: {error}")
-    })?;
-    validate(&profile).map_err(|error| {
-        format!("workspace profile at {display_path} is not valid: {error}")
-    })?;
+    let profile: WorkspaceProfile = serde_json::from_str(&body)
+        .map_err(|error| format!("workspace profile at {display_path} is not valid: {error}"))?;
+    validate(&profile)
+        .map_err(|error| format!("workspace profile at {display_path} is not valid: {error}"))?;
     Ok(WorkspaceState {
         path: display_path,
         profile: Some(profile),
@@ -331,15 +335,16 @@ mod tests {
     fn rejects_invalid_identities_and_bindings() {
         let mut duplicate = sample_profile();
         duplicate.channels[1].id = duplicate.channels[0].id.clone();
-        assert!(validate(&duplicate).unwrap_err().contains("duplicate channel"));
+        assert!(validate(&duplicate)
+            .unwrap_err()
+            .contains("duplicate channel"));
 
         let mut bad_author = sample_profile();
         bad_author.channels[0].authors[0].pubkey = "not-hex".into();
         assert!(validate(&bad_author).unwrap_err().contains("author pubkey"));
 
         let mut orphan_collector = sample_profile();
-        orphan_collector.collectors[0].channel_id =
-            "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".into();
+        orphan_collector.collectors[0].channel_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".into();
         assert!(validate(&orphan_collector)
             .unwrap_err()
             .contains("unlisted channel"));
@@ -377,9 +382,13 @@ mod tests {
             description: "Team channel".into(),
             authors: Vec::new(),
         };
-        let created =
-            create_initial_profile("wss://relay.example", "example-team", "Operator", channel.clone())
-                .expect("create initial profile");
+        let created = create_initial_profile(
+            "wss://relay.example",
+            "example-team",
+            "Operator",
+            channel.clone(),
+        )
+        .expect("create initial profile");
         let profile = created.profile.expect("profile present");
         assert_eq!(profile.relay_url, "wss://relay.example");
         assert_eq!(profile.channels.len(), 1);
@@ -388,8 +397,7 @@ mod tests {
         let reloaded = load_state().expect("reload profile");
         assert_eq!(reloaded.profile, Some(profile));
 
-        let overwrite =
-            create_initial_profile("wss://other.example", "other", "Operator", channel);
+        let overwrite = create_initial_profile("wss://other.example", "other", "Operator", channel);
         assert!(overwrite.unwrap_err().contains("already exists"));
 
         std::env::remove_var("CONTROL_TOWER_WORKSPACE");
