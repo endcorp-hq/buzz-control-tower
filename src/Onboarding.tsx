@@ -21,9 +21,10 @@ function isAuthorizationError(message: string) {
 
 /**
  * First-run journey: pick a relay and an identity, clear relay auth, pick a
- * channel. Owners paste their existing Buzz key (already a relay member, so
- * the admission wait disappears); everyone else generates a read-only device
- * key and waits for an operator to admit it. Everything it does is a
+ * channel. The default is a read-only device key (reused from the system
+ * keychain when one exists) that an operator admits and authorizes — no
+ * secret ever moves. Pasting an existing Buzz key stays as the escape hatch
+ * for owners who have their nsec handy and want to skip the admission wait. Everything it does is a
  * deterministic native command — `import_device_identity`,
  * `list_relay_channels`, `discover_channel_directory`, and a
  * `create_workspace_profile` that refuses to touch an existing profile.
@@ -42,7 +43,7 @@ export function Onboarding({
   const [phase, setPhase] = useState<OnboardingPhase>("relay");
   const [relayUrl, setRelayUrl] = useState("wss://");
   const [viewerName, setViewerName] = useState("");
-  const [identityMode, setIdentityMode] = useState<IdentityMode>("own");
+  const [identityMode, setIdentityMode] = useState<IdentityMode>("device");
   const [ownerSecret, setOwnerSecret] = useState("");
   const [channels, setChannels] = useState<ChannelSummary[]>([]);
   const [manualChannelId, setManualChannelId] = useState("");
@@ -209,19 +210,19 @@ export function Onboarding({
               <div className="onboarding-choice">
                 <button
                   type="button"
-                  className={identityMode === "own" ? "selected" : ""}
-                  onClick={() => setIdentityMode("own")}
-                >
-                  Use my Buzz identity
-                  <span>Paste the key you already use — no relay admission wait</span>
-                </button>
-                <button
-                  type="button"
                   className={identityMode === "device" ? "selected" : ""}
                   onClick={() => setIdentityMode("device")}
                 >
-                  Create a device key
-                  <span>Fresh read-only key an operator must admit first</span>
+                  Use a device key
+                  <span>Recommended — no key pasting; an agent authorizes this device</span>
+                </button>
+                <button
+                  type="button"
+                  className={identityMode === "own" ? "selected" : ""}
+                  onClick={() => setIdentityMode("own")}
+                >
+                  Paste my private key
+                  <span>Escape hatch if you have your nsec handy — skips authorization</span>
                 </button>
               </div>
               {identityMode === "own" && (
@@ -255,8 +256,8 @@ export function Onboarding({
           <div className="onboarding-authorize">
             <p>
               <strong>{relayHost(activeRelay.current)}</strong> does not recognize this device yet.
-              Send the read-only device key below to your relay operator; once it is admitted, this
-              screen advances automatically.
+              Post the read-only device key below in your Buzz channel and ask an agent to
+              authorize it; once it is admitted, this screen advances automatically.
             </p>
             {deviceIdentity.status === "ready" ? (
               <code className="onboarding-key">{deviceIdentity.identity.pubkey}</code>
