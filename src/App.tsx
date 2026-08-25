@@ -25,6 +25,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ComponentType } from "react";
+import { relaunchApp, stageAppUpdate, type AppUpdateState } from "./appUpdate";
 import { dataSource, MOS_AGENT_PUBKEY } from "./dataSource";
 import {
   loadDeviceIdentity,
@@ -86,6 +87,11 @@ function App() {
   const [deviceIdentity, setDeviceIdentity] = useState<DeviceIdentityState>({ status: "loading" });
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ phase: "idle" });
+
+  useEffect(() => {
+    void stageAppUpdate(setAppUpdate);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -183,6 +189,14 @@ function App() {
           <span className="topbar-divider" />
           <span className={`source-state source-${connection.state}`}>{connection.label}</span>
           <span className="snapshot-time">Snapshot {compactTime(snapshot.generatedAt)}</span>
+          {appUpdate.phase === "downloading" && (
+            <span className="update-pill">Downloading v{appUpdate.version}…</span>
+          )}
+          {appUpdate.phase === "ready" && (
+            <button className="update-pill update-ready" onClick={() => void relaunchApp()}>
+              v{appUpdate.version} ready — Restart
+            </button>
+          )}
         </div>
 
         <div className="viewer-block">
