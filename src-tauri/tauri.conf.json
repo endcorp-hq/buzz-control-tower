@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Buzz Control Tower",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "identifier": "cool.nilor.buzz-control-tower",
   "build": {
     "beforeDevCommand": "corepack pnpm dev",
@@ -34,6 +34,15 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE0Q0I1MjRGQ0YxNTcyMjMKUldRamNoWFBUMUxMRkZpLzJyMkp2MDE2S2k1YlhFeUFnOW1zZFkzYUFWc0VLVlJKMWRvQ1dsaXQK",
+      "endpoints": [
+        "https://github.com/endcorp-hq/buzz-control-tower/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

@@ -1,0 +1,23 @@
+{
+  "sources": [
+    {
+      "agentPubkey": "0000000000000000000000000000000000000000000000000000000000000000",
+      "agentName": "example-agent",
+      "sourceLabel": "Fleet host \u00b7 example-agent",
+      "command": [
+        "ssh",
+        "operator@fleet-host.example.internal",
+        "/usr/bin/python3",
+        "/usr/local/lib/control-tower/opencode_sqlite_exporter.py",
+        "--config",
+        "/etc/control-tower/agents/example-agent.json",
+        "--channel-id",
+        "00000000-0000-0000-0000-000000000000",
+        "--agent-pubkey",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "--agent-name",
+        "example-agent"
+      ]
+    }
+  ]
+}

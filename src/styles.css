@@ -57,6 +57,9 @@ button { color: inherit; }
 .relay-pulse.relay-error { background: var(--red); box-shadow: 0 0 0 4px rgba(255, 123, 123, .08); }
 .topbar-divider { height: 15px; width: 1px; background: var(--line); }
 .snapshot-time { color: #555b65; }
+.update-pill { padding: 3px 10px; border-radius: 999px; border: 1px solid rgba(246, 184, 74, .3); background: rgba(246, 184, 74, .08); color: #f9d28c; font: 11px var(--mono); }
+button.update-ready { cursor: pointer; }
+button.update-ready:hover { background: rgba(246, 184, 74, .18); }
 
 .viewer-block { display: flex; align-items: center; gap: 10px; padding: 0 20px; }
 .viewer-copy { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: 11px; }
