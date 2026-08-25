@@ -1,24 +1,50 @@
-# Buzz Control Tower
+<p align="center">
+  <img src="assets/control-tower-aviator-cap-1024.png" width="220" alt="Buzz Control Tower — the aviator cap" />
+</p>
 
-Cross-platform desktop companion for securely navigating Buzz agent activity,
-context provenance, workstreams, and delivery evidence.
+<h1 align="center">Buzz Control Tower</h1>
 
-The application is intentionally separate from the Buzz desktop monorepo and
-installer. It targets macOS, Windows, and Linux through Tauri 2.
+<p align="center"><em>Goggles down. Every agent in your fleet, on one radar.</em></p>
 
-## Initial product slice
+<p align="center">
+  <a href="https://github.com/endcorp-hq/buzz-control-tower/releases/latest"><img src="https://img.shields.io/github/v/release/endcorp-hq/buzz-control-tower?label=latest&color=b8860b" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-Tauri%202-2f6f4f" alt="macOS, Windows, Linux — Tauri 2" />
+  <a href="https://github.com/endcorp-hq/buzz-control-tower/actions/workflows/release.yml"><img src="https://github.com/endcorp-hq/buzz-control-tower/actions/workflows/release.yml/badge.svg" alt="Release build" /></a>
+</p>
 
-- Channel → workstream → agent navigation
-- Live, context, evidence, and artifact detail views
-- Fixture-driven domain model with a clean relay-data boundary
-- OS-keyring device identity and a read-only standard-event relay adapter
-- Source-redacted local Codex runtime workstream for the selected agent
-- Source-redacted fleet workstreams through forced-command SSH collectors
-- One runtime workspace profile driving every relay, channel, author, and
-  collector binding, edited by the deterministic `tower` CLI
-  (`docs/ONBOARDING.md`) — adding a channel needs no rebuild
+---
 
-## Run the desktop MVP
+Buzz Control Tower is the desktop companion for [Buzz](https://github.com/block/buzz) agent fleets: a
+cockpit view of what every agent is doing **right now** — live activity, context
+provenance, workstreams, and delivery evidence — without ever holding your Buzz
+key or your agents' secrets.
+
+You run agents. The Tower is where you watch them fly.
+
+## ✈️ Boarding
+
+Grab the installer for your platform from the
+[latest release](https://github.com/endcorp-hq/buzz-control-tower/releases/latest)
+— macOS (Apple silicon + Intel), Windows, and Linux.
+
+Install once; the Tower checks the release feed on launch and **updates
+itself**. Fixes just arrive.
+
+## 🗼 What's on the radar
+
+- **Fleet roster** — channel → workstream → agent navigation, one card per agent
+- **Live lane** — streaming replies, reasoning summaries, and tool calls as they
+  happen, decrypted from per-reader encrypted status events your agents publish
+- **Context provenance** — interactive cards showing the isolated request, safe
+  runtime fields, and source-integrity metadata, with explicit reasons for
+  anything withheld at source
+- **Delivery evidence** — ordinary signed Buzz messages attached through a
+  read-only relay interface
+- **One workspace profile** — every relay, channel, author, and collector
+  binding lives in a single profile edited by the deterministic `tower` CLI
+  (`docs/ONBOARDING.md`); adding a channel needs no rebuild
+
+## 🔧 Flying it from source
 
 Prerequisites: Node.js 20+, Corepack, and the Rust toolchain pinned in
 `rust-toolchain.toml`.
@@ -28,31 +54,36 @@ corepack pnpm install
 corepack pnpm tauri dev
 ```
 
-Run the complete repository verification with `corepack pnpm check`.
+`corepack pnpm check` runs the complete repository verification.
 
-The native app reads the selected local Codex rollout and the configured remote
-MOS agent sessions. Each source reduces its current turn into lifecycle,
-tool, file-change, provenance, and artifact events before raw runtime data can
-reach the Tauri webview. The exporter isolates a bounded,
-credential-redacted human-authored Buzz request for the Context viewer. The
-surrounding raw prompt envelope, private model reasoning, encrypted content,
-token counts, and rate limits are discarded. The local owner view retains the
-same UI-visible thinking
-summaries, tool parameters, and tool results available in Buzz's local activity
-feed, with credential-pattern redaction and length limits. When the independent
-device identity is also authorized, ordinary signed Buzz messages are attached
-as delivery evidence through the existing read-only `/query` interface.
+## 🛡️ The instrument panel (how data gets in)
 
-Context cards are interactive. They show the isolated request, safe runtime
-fields, source integrity metadata, and explicit reasons for any body withheld at
-source. Base/system instructions, durable memory, canvas bodies, and the full
-thread envelope are fingerprinted but not copied into the companion.
+The Tower is intentionally paranoid about what reaches the webview:
 
-If no matching local runtime is active, the app falls back to the signed public
-message view; if neither source is available, it uses clearly labeled fixture
-data. It never copies the owner's Buzz key.
+- Each source — local Codex runtime, forced-command SSH fleet collectors, or the
+  relay's encrypted status stream — reduces its current turn into lifecycle,
+  tool, file-change, provenance, and artifact events **before** raw runtime
+  data can reach the UI.
+- The exporter isolates a bounded, credential-redacted, human-authored Buzz
+  request for the Context viewer. Raw prompt envelopes, private model
+  reasoning, encrypted content, token counts, and rate limits are discarded.
+- Base/system instructions, durable memory, canvas bodies, and full thread
+  envelopes are fingerprinted, never copied.
+- The Tower holds its own OS-keyring device identity. It **never copies the
+  owner's Buzz key**.
+- No live source? It falls back to the signed public message view, then to
+  clearly labeled fixture data. It never fakes altitude.
 
-See `docs/ARCHITECTURE.md` for the data and security boundaries.
-The local execution contract is specified in `docs/LOCAL_WORKSTREAM.md`.
-The fleet execution contract is specified in `docs/REMOTE_WORKSTREAM.md`.
-Dany's shared-node Windows handoff is specified in `docs/DANY_SETUP.md`.
+## 📚 Flight manuals
+
+| Manual | Covers |
+|---|---|
+| `docs/ARCHITECTURE.md` | Data and security boundaries |
+| `docs/ONBOARDING.md` | Workspace profile + `tower` CLI |
+| `docs/LOCAL_WORKSTREAM.md` | Local execution contract |
+| `docs/REMOTE_WORKSTREAM.md` | Fleet execution contract |
+| `docs/DANY_SETUP.md` | Shared-node Windows handoff |
+
+---
+
+<p align="center"><sub>Built alongside the Buzz platform. Separate from the Buzz desktop monorepo and installer — on purpose.</sub></p>
