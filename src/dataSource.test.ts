@@ -498,6 +498,48 @@ describe("companion runtime snapshot", () => {
     expect(errorAgent.statusLabel).toBe("Turn error");
   });
 
+  it("settles a stale completed turn back to idle instead of presenting it live", () => {
+    const channelId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const page: RelayActivityPage = {
+      relayUrl: "wss://buzz.example.org",
+      channelId,
+      devicePubkey: "a".repeat(64),
+      messages: [],
+    };
+    const rosters = new Map([[channelId, {
+      authorPubkeys: ["6".repeat(64)],
+      authorNames: new Map<string, string>(),
+      authorRoles: new Map<string, string>(),
+    }]]);
+    // A replaceable status event persists on the relay indefinitely; this one
+    // finished long ago but still carries the harness's unclosed streaming entry.
+    const telemetryPages = new Map<string, RelayTelemetryPage>([[channelId, {
+      channelId,
+      statuses: [{
+        pubkey: "6".repeat(64),
+        eventCreatedAt: 1_600_000_000,
+        status: "complete",
+        completedAt: "2020-09-13T12:26:40Z",
+        activity: [
+          { at: "2020-09-13T12:26:35Z", kind: "tool", title: "bash", status: "complete" },
+          { at: "2020-09-13T12:26:39Z", kind: "message", title: "Streaming reply", status: "running" },
+        ],
+      }],
+    }]]);
+
+    const snapshot = relayPagesSnapshot([page], undefined, rosters, telemetryPages);
+    const agent = snapshot.channels[0].workstreams[0].agents[0];
+
+    expect(agent.status).toBe("idle");
+    expect(agent.statusLabel).toBe("Idle");
+    // The unclosed streaming entry settles: past-tense title, no running pulse.
+    expect(agent.operation).toBe("Reply sent");
+    expect(agent.activity[0].title).toBe("Reply sent");
+    expect(agent.activity[0].status).toBe("complete");
+    // Entries from a previous day carry their date, not a bare clock time.
+    expect(agent.activity[0].at).toContain("Sep 13");
+  });
+
   it("keeps runtime lanes authoritative over telemetry for the same agent", () => {
     const channelId = "0b7c0958-3f7f-48c8-af3f-31e549b10e31";
     const runtime: RuntimeWorkstreamPage = {

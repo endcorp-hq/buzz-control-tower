@@ -335,6 +335,12 @@ const TELEMETRY_STATUS_CARD: Record<
 
 const MAX_TELEMETRY_ACTIVITY = 20;
 
+// How long a completed turn keeps its "Turn complete" card before the agent
+// reads as plain idle again. Status events are replaceable, so the last turn's
+// snapshot persists on the relay indefinitely — without this window a card
+// would say "Turn complete" forever.
+const COMPLETE_TURN_LINGER_MS = 5 * 60_000;
+
 function activityEventKind(kind: string | null | undefined): ActivityEvent["kind"] {
   return kind === "tool" || kind === "message" || kind === "evidence" || kind === "lifecycle"
     ? kind
@@ -347,18 +353,33 @@ function activityEventStatus(status: string | null | undefined): ActivityEvent["
     : undefined;
 }
 
+// Once the agent's own summary says the turn is over, nothing in the snapshot
+// is still running. The harness never closes out the final streaming entry, so
+// a finished turn would otherwise keep a pulsing "Streaming reply" forever.
+function settledStatus(
+  status: ActivityEvent["status"],
+  turnOver: boolean,
+): ActivityEvent["status"] {
+  return turnOver && status === "running" ? "complete" : status;
+}
+
+function settledTitle(title: string, turnOver: boolean): string {
+  return turnOver && title === "Streaming reply" ? "Reply sent" : title;
+}
+
 // Telemetry activity arrives newest-last; render it newest-first like the
 // runtime lanes do.
 function activityFromTelemetry(telemetry: AgentTelemetry): ActivityEvent[] {
+  const turnOver = telemetry.status !== "working";
   return telemetry.activity
     .slice(-MAX_TELEMETRY_ACTIVITY)
     .map((entry, index): ActivityEvent => ({
       id: `${telemetry.pubkey}-telemetry-${index}`,
       at: entry.at ? clockTime(entry.at) : "—",
       kind: activityEventKind(entry.kind),
-      title: entry.title || "Agent activity",
+      title: settledTitle(entry.title || "Agent activity", turnOver),
       detail: "Reported by agent work-status telemetry.",
-      status: activityEventStatus(entry.status),
+      status: settledStatus(activityEventStatus(entry.status), turnOver),
     }))
     .reverse();
 }
@@ -366,14 +387,17 @@ function activityFromTelemetry(telemetry: AgentTelemetry): ActivityEvent[] {
 // Decrypted rich-lane entries arrive newest-first from the backend and are
 // already shaped like ActivityEvents; normalize kinds/status and clock-format
 // the timestamps.
-function activityFromObserverStream(stream: ObserverAgentStream): ActivityEvent[] {
+function activityFromObserverStream(
+  stream: ObserverAgentStream,
+  turnOver: boolean,
+): ActivityEvent[] {
   return stream.entries.map((entry): ActivityEvent => ({
     id: `${stream.agentPubkey}-rich-${entry.id}`,
     at: entry.at ? clockTime(entry.at) : "—",
     kind: activityEventKind(entry.kind),
-    title: entry.title,
+    title: settledTitle(entry.title, turnOver),
     detail: entry.detail,
-    status: activityEventStatus(entry.status),
+    status: settledStatus(activityEventStatus(entry.status), turnOver),
     parameters: entry.parameters.length > 0 ? entry.parameters : undefined,
     result: entry.result ?? undefined,
   }));
@@ -402,11 +426,19 @@ function relayAgentCard(
   observer?: ObserverAgentStream,
 ) {
   const newest = messages.at(-1);
-  const card = telemetry ? TELEMETRY_STATUS_CARD[telemetry.status] : undefined;
+  const live = telemetry?.status === "working";
+  const lingering =
+    telemetry?.status === "complete" &&
+    Date.now() - telemetry.eventCreatedAt * 1000 <= COMPLETE_TURN_LINGER_MS;
+  const card = telemetry
+    ? telemetry.status === "complete" && !lingering
+      ? TELEMETRY_STATUS_CARD.idle
+      : TELEMETRY_STATUS_CARD[telemetry.status]
+    : undefined;
   // The decrypted rich lane supersedes the redacted telemetry activity list
   // (every telemetry title also exists as a richer entry); telemetry still
   // owns card status, model, and timings — it is the agent's own summary.
-  const richActivity = observer ? activityFromObserverStream(observer) : [];
+  const richActivity = observer ? activityFromObserverStream(observer, !live) : [];
   const telemetryActivity = richActivity.length > 0
     ? richActivity
     : telemetry
@@ -510,12 +542,17 @@ export function relaySnapshot(
 
 function clockTime(value: string | number) {
   const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
-  return date.toLocaleTimeString("en", {
+  const time = date.toLocaleTimeString("en", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
   });
+  // A bare clock time on an entry from a previous day reads as "today"; make
+  // the staleness visible.
+  return date.toDateString() === new Date().toDateString()
+    ? time
+    : `${date.toLocaleDateString("en", { month: "short", day: "numeric" })} ${time}`;
 }
 
 function elapsedTime(startedAt: string, completedAt?: string) {

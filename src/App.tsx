@@ -366,14 +366,21 @@ function PanelHeading({ eyebrow, title, description }: { eyebrow: string; title:
 }
 
 function LiveView({ events, agent }: { events: ActivityEvent[]; agent: AgentTurn }) {
+  const live = agent.status === "working";
   return (
     <>
-      <PanelHeading eyebrow="Turn stream" title="Live activity" description="A safe semantic view of this turn, including work performed by nested helpers." />
+      <PanelHeading
+        eyebrow="Turn stream"
+        title={live ? "Live activity" : "Last turn"}
+        description={live
+          ? "A safe semantic view of this turn, including work performed by nested helpers."
+          : "The agent is not streaming right now; this is its most recent reported turn."}
+      />
       {(agent.liveText || agent.liveThought) && (
         <div className="live-stream">
           {agent.liveText && (
             <div className="live-stream-block">
-              <span className="live-stream-label">Streaming reply</span>
+              <span className="live-stream-label">{live ? "Streaming reply" : "Final reply"}</span>
               <pre className="live-stream-text">{agent.liveText}</pre>
             </div>
           )}
