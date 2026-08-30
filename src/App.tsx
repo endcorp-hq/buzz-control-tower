@@ -46,6 +46,22 @@ import { allAgents, countWorkingAgents, findAgent, matchesAgentSearch } from "./
 
 type DetailTab = "live" | "context" | "evidence" | "artifacts";
 
+const CONNECTED_REFRESH_DELAY_MS = 5_000;
+const UNAVAILABLE_RETRY_DELAY_MS = 15_000;
+
+export function refreshDelayFor(connection: DataConnection): number | undefined {
+  if (connection.state === "connected") return CONNECTED_REFRESH_DELAY_MS;
+  // A temporary relay outage should heal without requiring the operator to
+  // restart the desktop app. Keep setup-required manual so an unauthorised
+  // device does not repeatedly prompt the relay after an operator response.
+  if (connection.state === "error" && connection.retryable) return UNAVAILABLE_RETRY_DELAY_MS;
+  return undefined;
+}
+
+export function shouldShowRelayRefresh(connection: DataConnection, deviceReady: boolean) {
+  return connection.state === "error" || (connection.state === "setup-required" && deviceReady);
+}
+
 const tabs: Array<{ id: DetailTab; label: string; icon: ComponentType<{ size?: number }> }> = [
   { id: "live", label: "Live", icon: Radio },
   { id: "context", label: "Context", icon: Braces },
@@ -101,9 +117,8 @@ function App() {
       if (cancelled) return;
       setSnapshot(result.snapshot);
       setConnection(result.connection);
-      if (result.connection.state === "connected") {
-        timer = window.setTimeout(refresh, 5_000);
-      }
+      const delay = refreshDelayFor(result.connection);
+      if (delay !== undefined) timer = window.setTimeout(refresh, delay);
     };
     void refresh();
     void loadDeviceIdentity().then(setDeviceIdentity);
@@ -303,13 +318,18 @@ function App() {
                   ? "The OS keyring could not initialize the observer device."
                   : "Preparing a device-only identity for read-only relay access."}
             </span>
-            {deviceIdentity.status === "ready" && connection.state === "setup-required" && (
+            {shouldShowRelayRefresh(connection, deviceIdentity.status === "ready") && (
               <div className="security-actions">
-                <button className="copy-device-key" onClick={copyDeviceKey}>
-                  {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy device key"}
-                </button>
-                <button className="copy-device-key" onClick={() => setRefreshVersion((version) => version + 1)}>
-                  Retry relay
+                {connection.state === "setup-required" && deviceIdentity.status === "ready" && (
+                  <button className="copy-device-key" onClick={copyDeviceKey}>
+                    {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy device key"}
+                  </button>
+                )}
+                <button
+                  className="copy-device-key"
+                  onClick={() => setRefreshVersion((version) => version + 1)}
+                >
+                  {connection.state === "error" ? "Refresh now" : "Retry relay"}
                 </button>
               </div>
             )}

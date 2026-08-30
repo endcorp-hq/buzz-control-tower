@@ -96,6 +96,8 @@ export type DataConnection = {
   state: "fixture" | "connected" | "setup-required" | "error" | "onboarding";
   label: string;
   detail: string;
+  /** Whether a temporary failure is safe for the UI to retry automatically. */
+  retryable?: boolean;
 };
 
 export type SnapshotLoadResult = {

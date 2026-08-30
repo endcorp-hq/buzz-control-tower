@@ -3,8 +3,8 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import { ContextView } from "./App";
-import type { ContextSource } from "./domain";
+import { ContextView, refreshDelayFor, shouldShowRelayRefresh } from "./App";
+import type { ContextSource, DataConnection } from "./domain";
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -84,5 +84,36 @@ describe("inspectable context", () => {
       "Make context inspectable.",
     );
     act(() => root.unmount());
+  });
+});
+
+describe("relay refresh scheduling", () => {
+  const connection = (state: DataConnection["state"]): DataConnection => ({
+    state,
+    label: "Relay",
+    detail: "Test connection",
+  });
+
+  it("keeps connected relay data on the five-second refresh cadence", () => {
+    expect(refreshDelayFor(connection("connected"))).toBe(5_000);
+  });
+
+  it("retries a transient relay error without restarting the app", () => {
+    expect(refreshDelayFor({ ...connection("error"), retryable: true })).toBe(15_000);
+  });
+
+  it("does not poll a configuration error that needs operator action", () => {
+    expect(refreshDelayFor({ ...connection("error"), retryable: false })).toBeUndefined();
+  });
+
+  it("does not automatically retry onboarding or authorization failures", () => {
+    expect(refreshDelayFor(connection("onboarding"))).toBeUndefined();
+    expect(refreshDelayFor(connection("setup-required"))).toBeUndefined();
+  });
+
+  it("keeps manual refresh available for a relay error even without a device key", () => {
+    expect(shouldShowRelayRefresh(connection("error"), false)).toBe(true);
+    expect(shouldShowRelayRefresh(connection("setup-required"), false)).toBe(false);
+    expect(shouldShowRelayRefresh(connection("setup-required"), true)).toBe(true);
   });
 });

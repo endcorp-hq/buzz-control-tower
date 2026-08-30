@@ -787,6 +787,7 @@ class CompanionDataSource implements TowerDataSource {
           state: "error",
           label: "Workspace profile invalid",
           detail: error instanceof Error ? error.message : String(error),
+          retryable: false,
         },
       };
     }
@@ -962,6 +963,7 @@ class CompanionDataSource implements TowerDataSource {
         detail: setupRequired
           ? `Add this device identity to ${profile.relayUrl} and the configured channels to enable signed public activity.`
           : message,
+        retryable: !setupRequired,
       },
     };
   }
