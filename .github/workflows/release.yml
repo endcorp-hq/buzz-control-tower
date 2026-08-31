@@ -43,6 +43,10 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
+      - name: Install macOS Rust targets
+        if: startsWith(matrix.platform, 'macos')
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
