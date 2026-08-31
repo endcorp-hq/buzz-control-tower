@@ -268,6 +268,8 @@ button.update-ready:hover { background: rgba(246, 184, 74, .18); }
 .relay-unavailable .relay-error-detail { margin-top: 10px; color: #bc8787; font: 10px var(--mono); }
 .relay-refresh-button { display: flex; align-items: center; gap: 7px; margin-top: 22px; padding: 9px 12px; border: 1px solid rgba(246,184,74,.34); border-radius: 7px; color: #f2c675; background: rgba(246,184,74,.09); cursor: pointer; font-size: 11px; }
 .relay-refresh-button:hover { background: rgba(246,184,74,.16); }
+.relay-unavailable-actions { display: flex; gap: 10px; margin-top: 22px; }
+.relay-unavailable-actions .relay-refresh-button { margin-top: 0; }
 .loading-shell { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 12px; color: #7b818c; background: #0b0c10; font-size: 11px; }
 .loading-mark { width: 44px; height: 44px; display: grid; place-items: center; color: var(--amber); border: 1px solid rgba(246,184,74,.2); border-radius: 13px; background: var(--amber-soft); }
 

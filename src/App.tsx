@@ -143,11 +143,18 @@ export function RelayUnavailable({
           : `Buzz Control Tower cannot reach ${snapshot.relayUrl?.replace(/^wss?:\/\//, "") ?? "the configured relay"}.`}
       </p>
       {!needsAuthorization && <p className="relay-error-detail">{connection.detail}</p>}
-      {needsAuthorization && deviceReady ? (
-        <button className="relay-refresh-button" onClick={onCopyDeviceKey}>
-          {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy device key"}
-        </button>
-      ) : !needsAuthorization && (
+      {needsAuthorization ? (
+        <div className="relay-unavailable-actions">
+          {deviceReady && (
+            <button className="relay-refresh-button" onClick={onCopyDeviceKey}>
+              {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy device key"}
+            </button>
+          )}
+          <button className="relay-refresh-button" onClick={onRefresh}>
+            <RefreshCw size={15} /> Check again
+          </button>
+        </div>
+      ) : (
         <button className="relay-refresh-button" onClick={onRefresh}>
           <RefreshCw size={15} /> Refresh now
         </button>
@@ -417,15 +424,6 @@ function App() {
                   ? "The OS keyring could not initialize the observer device."
                   : "Preparing a device-only identity for read-only relay access."}
             </span>
-            {connection.state === "setup-required" && deviceIdentity.status === "ready" && !relayUnavailable && (
-              <div className="security-actions">
-                {connection.state === "setup-required" && deviceIdentity.status === "ready" && (
-                  <button className="copy-device-key" onClick={copyDeviceKey}>
-                    {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy device key"}
-                  </button>
-                )}
-              </div>
-            )}
           </div>
         </div>
       </aside>

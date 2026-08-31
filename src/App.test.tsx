@@ -186,4 +186,39 @@ describe("relay refresh scheduling", () => {
     act(() => root.unmount());
     current.remove();
   });
+
+  it("lets an authorizing device re-check the relay without restarting", () => {
+    const current = document.createElement("div");
+    document.body.append(current);
+    const root = createRoot(current);
+    let refreshes = 0;
+    const snapshot: TowerSnapshot = {
+      generatedAt: "2026-08-30T00:00:00Z",
+      viewerName: "Sam",
+      workspaceName: "Example",
+      relayUrl: "wss://relay.example",
+      source: "unavailable",
+      channels: [],
+    };
+
+    act(() => root.render(
+      <RelayUnavailable
+        snapshot={snapshot}
+        connection={{ state: "setup-required", label: "Authorize device", detail: "Add this device identity to wss://relay.example to enable signed public activity.", retryable: false }}
+        onRefresh={() => { refreshes += 1; }}
+        deviceReady={true}
+        onCopyDeviceKey={() => undefined}
+        copyState="idle"
+      />,
+    ));
+    expect(current.textContent).toContain("Authorize this device");
+    const buttons = [...current.querySelectorAll("button")];
+    expect(buttons.find((button) => button.textContent?.includes("Copy device key"))).toBeDefined();
+    const recheck = buttons.find((button) => button.textContent?.includes("Check again"));
+    expect(recheck).toBeDefined();
+    act(() => recheck?.click());
+    expect(refreshes).toBe(1);
+    act(() => root.unmount());
+    current.remove();
+  });
 });
