@@ -27,7 +27,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { relaunchApp, startAppUpdates, type AppUpdateState } from "./appUpdate";
-import { dataSource, MOS_AGENT_PUBKEY } from "./dataSource";
+import { ChannelPicker } from "./ChannelPicker";
+import { dataSource, MOS_AGENT_PUBKEY, removeWorkspaceChannel } from "./dataSource";
 import {
   loadDeviceIdentity,
   type DeviceIdentityState,
@@ -180,6 +181,7 @@ function App() {
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ phase: "idle" });
   const [toast, setToast] = useState<"reconnecting" | "recovered">();
+  const [channelEditError, setChannelEditError] = useState<string>();
 
   useEffect(() => startAppUpdates(setAppUpdate), []);
 
@@ -278,6 +280,19 @@ function App() {
     });
   };
 
+  const configuredChannelIds = snapshot.configuredChannelIds ?? [];
+  const channelsEditable = Boolean(snapshot.relayUrl) && configuredChannelIds.length > 0;
+
+  const removeChannel = async (channelId: string) => {
+    setChannelEditError(undefined);
+    try {
+      await removeWorkspaceChannel(channelId);
+      setRefreshVersion((version) => version + 1);
+    } catch (cause) {
+      setChannelEditError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
   const copyDeviceKey = async () => {
     if (deviceIdentity.status !== "ready") return;
     try {
@@ -333,7 +348,16 @@ function App() {
             <span className="eyebrow">Workspace</span>
             <h2>Work graph</h2>
           </div>
-          <div className="live-count"><span>{countWorkingAgents(snapshot)}</span> live</div>
+          <div className="sidebar-heading-actions">
+            <div className="live-count"><span>{countWorkingAgents(snapshot)}</span> live</div>
+            {channelsEditable && snapshot.relayUrl && (
+              <ChannelPicker
+                relayUrl={snapshot.relayUrl}
+                configuredChannelIds={configuredChannelIds}
+                onChanged={() => setRefreshVersion((version) => version + 1)}
+              />
+            )}
+          </div>
         </div>
 
         <label className="search-box">
@@ -361,24 +385,47 @@ function App() {
 
         <nav className="tree" aria-label="Channel work graph">
           {snapshot.channels.map((channel) => {
+            const agentCount = channel.workstreams.reduce(
+              (sum, workstream) => sum + workstream.agents.length, 0);
+            // A channel with no discovered agents at all (usually one that was
+            // just added) stays visible as a quiet node instead of vanishing —
+            // unless the operator is actively filtering.
             const channelVisible = channel.workstreams.some((workstream) =>
               workstream.agents.some((agent) => visibleAgentIds.has(agent.id)),
-            );
+            ) || (agentCount === 0 && !search && statusFilter === "all");
             if (!channelVisible) return null;
             const expanded = expandedChannels.has(channel.id);
             const workingCount = channel.workstreams.flatMap((workstream) => workstream.agents).filter((agent) => agent.status === "working").length;
+            const removable = channelsEditable
+              && configuredChannelIds.length > 1
+              && configuredChannelIds.includes(channel.id);
 
             return (
               <div className="channel-node" key={channel.id}>
-                <button className="channel-button" onClick={() => toggleChannel(channel.id)}>
-                  {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                  <span className="hash">#</span>
-                  <span>{channel.name}</span>
-                  {workingCount > 0 && <span className="tree-count">{workingCount}</span>}
-                </button>
+                <div className="channel-row">
+                  <button className="channel-button" onClick={() => toggleChannel(channel.id)}>
+                    {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                    <span className="hash">#</span>
+                    <span>{channel.name}</span>
+                    {workingCount > 0 && <span className="tree-count">{workingCount}</span>}
+                  </button>
+                  {removable && (
+                    <button
+                      className="channel-remove"
+                      onClick={() => void removeChannel(channel.id)}
+                      aria-label={`Stop observing ${channel.name}`}
+                      title="Stop observing this channel"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
 
                 {expanded && (
                   <div className="channel-children">
+                    {agentCount === 0 && (
+                      <div className="empty-tree">No agents discovered in this channel yet.</div>
+                    )}
                     {channel.workstreams.map((workstream) => {
                       const visibleAgents = workstream.agents.filter((agent) => visibleAgentIds.has(agent.id));
                       if (!visibleAgents.length) return null;
@@ -411,8 +458,14 @@ function App() {
               </div>
             );
           })}
-          {visibleAgentIds.size === 0 && <div className="empty-tree">No matching work found.</div>}
+          {visibleAgentIds.size === 0
+            && (search || statusFilter !== "all" || snapshot.channels.length === 0)
+            && <div className="empty-tree">No matching work found.</div>}
         </nav>
+
+        {channelEditError && (
+          <div className="channel-edit-error" role="alert">{channelEditError}</div>
+        )}
 
         <div className="security-note">
           <LockKeyhole size={15} />

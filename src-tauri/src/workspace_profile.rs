@@ -5,9 +5,13 @@
 //! CLI (`scripts/tower.mjs`) or any operator tooling. Native code loads and
 //! validates the profile from disk and hands the webview a bounded,
 //! already-validated document. Nothing is compiled in and no workspace is
-//! joined automatically: with no profile on disk the app enters onboarding,
-//! and the only webview-reachable write is `create_initial_profile`, which
-//! refuses to run once a profile exists — retargeting an existing install
+//! joined automatically: with no profile on disk the app enters onboarding.
+//!
+//! The webview-reachable writes are deliberately narrow: `create_initial_profile`
+//! (which refuses to run once a profile exists), and `add_channel` /
+//! `remove_channel`, which only grow or shrink the observed-channel list and
+//! re-run the full profile validation before persisting. Everything else —
+//! retargeting the relay, collectors, pinned authors, the local runtime —
 //! stays an operator/CLI action.
 
 use std::fs;
@@ -269,19 +273,92 @@ pub fn create_initial_profile(
         local_runtime: None,
     };
     validate(&profile)?;
+    write_profile(&path, &profile)?;
+    Ok(WorkspaceState {
+        path: display_path,
+        profile: Some(profile),
+    })
+}
+
+fn write_profile(path: &PathBuf, profile: &WorkspaceProfile) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create the workspace profile directory: {error}"))?;
     }
-    let body = serde_json::to_string_pretty(&profile)
+    let body = serde_json::to_string_pretty(profile)
         .map_err(|error| format!("cannot encode the workspace profile: {error}"))?;
     let temp = path.with_extension("json.tmp");
     fs::write(&temp, body + "\n")
         .map_err(|error| format!("cannot write the workspace profile: {error}"))?;
-    fs::rename(&temp, &path)
+    fs::rename(&temp, path)
         .map_err(|error| format!("cannot finalize the workspace profile: {error}"))?;
+    Ok(())
+}
+
+/// Load the existing profile or explain why a channel edit cannot proceed.
+fn load_profile_for_edit() -> Result<(PathBuf, WorkspaceProfile), String> {
+    let path = profile_path()?;
+    let state = load_state()?;
+    let profile = state
+        .profile
+        .ok_or_else(|| format!("no workspace profile exists at {}", state.path))?;
+    Ok((path, profile))
+}
+
+/// Append a channel to the observed-channel list. The full profile validation
+/// runs before anything is persisted, so the channel cap, UUID shape, and
+/// duplicate checks all apply.
+pub fn add_channel(channel: ChannelConfig) -> Result<WorkspaceState, String> {
+    let (path, mut profile) = load_profile_for_edit()?;
+    if profile.channels.iter().any(|existing| existing.id == channel.id) {
+        return Err(format!(
+            "channel {} is already part of this workspace",
+            channel.id
+        ));
+    }
+    profile.channels.push(channel);
+    validate(&profile)?;
+    write_profile(&path, &profile)?;
     Ok(WorkspaceState {
-        path: display_path,
+        path: path.to_string_lossy().into_owned(),
+        profile: Some(profile),
+    })
+}
+
+/// Remove a channel from the observed-channel list. Refuses to orphan fleet
+/// collectors or the local runtime — unbinding those stays a CLI action — and
+/// refuses to remove the last channel.
+pub fn remove_channel(channel_id: &str) -> Result<WorkspaceState, String> {
+    let (path, mut profile) = load_profile_for_edit()?;
+    if !profile.channels.iter().any(|channel| channel.id == channel_id) {
+        return Err(format!("channel {channel_id} is not part of this workspace"));
+    }
+    if profile.channels.len() == 1 {
+        return Err("cannot remove the last channel; the workspace must observe at least one".into());
+    }
+    if profile
+        .collectors
+        .iter()
+        .any(|collector| collector.channel_id == channel_id)
+    {
+        return Err(format!(
+            "channel {channel_id} has a fleet collector bound to it; unbind it with the tower CLI first"
+        ));
+    }
+    if profile
+        .local_runtime
+        .as_ref()
+        .is_some_and(|local| local.channel_id == channel_id)
+    {
+        return Err(format!(
+            "channel {channel_id} is bound to the local runtime; unbind it with the tower CLI first"
+        ));
+    }
+    profile.channels.retain(|channel| channel.id != channel_id);
+    validate(&profile)?;
+    write_profile(&path, &profile)?;
+    Ok(WorkspaceState {
+        path: path.to_string_lossy().into_owned(),
         profile: Some(profile),
     })
 }
@@ -289,6 +366,11 @@ pub fn create_initial_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Tests that point CONTROL_TOWER_WORKSPACE at a scratch file mutate global
+    // process state; serialize them so parallel test threads cannot interleave.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn sample_profile() -> WorkspaceProfile {
         WorkspaceProfile {
@@ -366,8 +448,9 @@ mod tests {
 
     #[test]
     fn missing_profile_enters_onboarding_and_create_refuses_overwrite() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let path = std::env::temp_dir().join(format!(
-            "control-tower-workspace-test-{}/workspace.json",
+            "control-tower-workspace-test-create-{}/workspace.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
@@ -399,6 +482,86 @@ mod tests {
 
         let overwrite = create_initial_profile("wss://other.example", "other", "Operator", channel);
         assert!(overwrite.unwrap_err().contains("already exists"));
+
+        std::env::remove_var("CONTROL_TOWER_WORKSPACE");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn channel_edits_persist_and_respect_bindings() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "control-tower-workspace-test-edit-{}/workspace.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        std::env::set_var("CONTROL_TOWER_WORKSPACE", &path);
+
+        // No profile yet: channel edits refuse instead of inventing a workspace.
+        assert!(add_channel(ChannelConfig {
+            id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".into(),
+            name: "orphan".into(),
+            description: String::new(),
+            authors: Vec::new(),
+        })
+        .unwrap_err()
+        .contains("no workspace profile"));
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        let profile = sample_profile();
+        fs::write(&path, serde_json::to_string_pretty(&profile).unwrap()).unwrap();
+
+        // Duplicate ids are refused before anything is written.
+        assert!(add_channel(profile.channels[0].clone())
+            .unwrap_err()
+            .contains("already part"));
+
+        let added = add_channel(ChannelConfig {
+            id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".into(),
+            name: "fresh-channel".into(),
+            description: "Just added".into(),
+            authors: Vec::new(),
+        })
+        .expect("add channel");
+        assert_eq!(added.profile.as_ref().unwrap().channels.len(), 3);
+        let reloaded = load_state().expect("reload after add");
+        assert_eq!(reloaded.profile.unwrap().channels.len(), 3);
+
+        // Invalid ids never reach disk.
+        assert!(add_channel(ChannelConfig {
+            id: "not-a-uuid".into(),
+            name: "bad".into(),
+            description: String::new(),
+            authors: Vec::new(),
+        })
+        .unwrap_err()
+        .contains("not a UUID"));
+
+        // A channel with a collector bound to it cannot be removed here.
+        assert!(remove_channel("1da2b83b-c1e5-44b3-8a1c-546bf665933e")
+            .unwrap_err()
+            .contains("fleet collector"));
+
+        let removed = remove_channel("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").expect("remove");
+        assert_eq!(removed.profile.as_ref().unwrap().channels.len(), 2);
+        assert!(remove_channel("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+            .unwrap_err()
+            .contains("not part"));
+
+        // The last channel is protected.
+        let removed = remove_channel("1da2b83b-c1e5-44b3-8a1c-546bf665933e");
+        assert!(removed
+            .unwrap_err()
+            .contains("fleet collector"));
+        let mut no_collector = load_state().unwrap().profile.unwrap();
+        no_collector.collectors.clear();
+        fs::write(&path, serde_json::to_string_pretty(&no_collector).unwrap()).unwrap();
+        remove_channel("1da2b83b-c1e5-44b3-8a1c-546bf665933e").expect("remove unbound");
+        assert!(remove_channel("0b7c0958-3f7f-48c8-af3f-31e549b10e31")
+            .unwrap_err()
+            .contains("last channel"));
 
         std::env::remove_var("CONTROL_TOWER_WORKSPACE");
         let _ = fs::remove_file(&path);

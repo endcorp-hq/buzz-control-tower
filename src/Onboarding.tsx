@@ -351,8 +351,8 @@ export function Onboarding({
         {error && <p className="onboarding-error">{error}</p>}
 
         <p className="onboarding-foot">
-          <Sparkles size={12} /> Later changes — more channels, fleet collectors, pinned authors —
-          are plain commands: <code>corepack pnpm tower --help</code>.
+          <Sparkles size={12} /> Add more channels later with the + button on the work graph.
+          Fleet collectors and pinned authors stay plain commands: <code>corepack pnpm tower --help</code>.
         </p>
       </div>
     </main>

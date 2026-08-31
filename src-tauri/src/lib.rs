@@ -142,6 +142,27 @@ fn create_workspace_profile(
     )
 }
 
+#[tauri::command]
+fn add_workspace_channel(
+    channel_id: String,
+    channel_name: String,
+    channel_description: String,
+) -> Result<workspace_profile::WorkspaceState, String> {
+    workspace_profile::add_channel(workspace_profile::ChannelConfig {
+        id: channel_id,
+        name: channel_name,
+        description: channel_description,
+        authors: Vec::new(),
+    })
+}
+
+#[tauri::command]
+fn remove_workspace_channel(
+    channel_id: String,
+) -> Result<workspace_profile::WorkspaceState, String> {
+    workspace_profile::remove_channel(&channel_id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -162,7 +183,9 @@ pub fn run() {
             load_workspace_state,
             list_relay_channels,
             discover_channel_directory,
-            create_workspace_profile
+            create_workspace_profile,
+            add_workspace_channel,
+            remove_workspace_channel
         ])
         .run(tauri::generate_context!())
         .expect("error while running Buzz Control Tower");

@@ -45,6 +45,29 @@ export type WorkspaceState = {
 
 export type ChannelSummary = { id: string; name: string; description: string };
 
+export function listRelayChannels(relayUrl: string): Promise<ChannelSummary[]> {
+  return invoke<ChannelSummary[]>("list_relay_channels", { relayUrl });
+}
+
+export function discoverChannelSummary(
+  relayUrl: string,
+  channelId: string,
+): Promise<ChannelDirectory> {
+  return invoke<ChannelDirectory>("discover_channel_directory", { relayUrl, channelId });
+}
+
+export function addWorkspaceChannel(channel: ChannelSummary): Promise<WorkspaceState> {
+  return invoke<WorkspaceState>("add_workspace_channel", {
+    channelId: channel.id,
+    channelName: channel.name,
+    channelDescription: channel.description,
+  });
+}
+
+export function removeWorkspaceChannel(channelId: string): Promise<WorkspaceState> {
+  return invoke<WorkspaceState>("remove_workspace_channel", { channelId });
+}
+
 export type DirectoryMember = {
   pubkey: string;
   name?: string;
@@ -772,6 +795,31 @@ export function mergeChannelRoster(
   };
 }
 
+// A configured channel with no reachable relay page (empty roster, discovery
+// refused, fresh add with no activity yet) would otherwise vanish from the
+// snapshot entirely, which reads as a broken add. Give every profile channel a
+// node — an empty one renders as a quiet channel — and record the configured
+// ids so the sidebar knows which channels are editable.
+export function withConfiguredChannels(
+  snapshot: TowerSnapshot,
+  profileChannels: WorkspaceChannel[],
+): TowerSnapshot {
+  const present = new Set(snapshot.channels.map((channel) => channel.id));
+  const missing = profileChannels
+    .filter((channel) => !present.has(channel.id))
+    .map((channel) => ({
+      id: channel.id,
+      name: channel.name,
+      description: channel.description ?? "",
+      workstreams: [],
+    }));
+  return {
+    ...snapshot,
+    channels: [...snapshot.channels, ...missing],
+    configuredChannelIds: profileChannels.map((channel) => channel.id),
+  };
+}
+
 const DIRECTORY_TTL_MS = 60_000;
 const directoryCache = new Map<string, { at: number; directory: ChannelDirectory }>();
 
@@ -936,9 +984,9 @@ class CompanionDataSource implements TowerDataSource {
         ...collectorFailures,
       ];
       return {
-        snapshot: runtimePagesSnapshot(
+        snapshot: withConfiguredChannels(runtimePagesSnapshot(
           sources, remoteDocument?.errors, presentation, rosters, relayPages, telemetryPages,
-          observerStreams),
+          observerStreams), profile.channels),
         connection: {
           state: "connected",
           label: hasRemote && hasLocal ? "Fleet + local" : hasRemote ? "Agent fleet" : "Local runtime",
@@ -949,8 +997,9 @@ class CompanionDataSource implements TowerDataSource {
 
     if (relayPages.size > 0) {
       return {
-        snapshot: relayPagesSnapshot(
+        snapshot: withConfiguredChannels(relayPagesSnapshot(
           [...relayPages.values()], presentation, rosters, telemetryPages, observerStreams),
+          profile.channels),
         connection: {
           state: "connected",
           label: "Public relay",

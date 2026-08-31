@@ -90,6 +90,11 @@ export type TowerSnapshot = {
   relayUrl?: string;
   source: "fixture" | "relay" | "runtime" | "unavailable";
   channels: Channel[];
+  /**
+   * Channel ids pinned in the workspace profile, in profile order. Absent on
+   * fixture and unavailable snapshots, where no profile channels are editable.
+   */
+  configuredChannelIds?: string[];
 };
 
 export type DataConnection = {

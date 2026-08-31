@@ -15,9 +15,40 @@ import {
   type RelayActivityPage,
   type ObserverStreamsPage,
   type RelayTelemetryPage,
+  withConfiguredChannels,
   type RuntimeWorkstreamPage,
   type WorkspaceProfile,
 } from "./dataSource";
+
+describe("withConfiguredChannels", () => {
+  it("keeps every profile channel visible and records the configured ids", () => {
+    const base = relayPagesSnapshot([{
+      relayUrl: "wss://relay.example",
+      channelId: "0b7c0958-3f7f-48c8-af3f-31e549b10e31",
+      devicePubkey: "device",
+      messages: [],
+    }]);
+    const merged = withConfiguredChannels(base, [
+      { id: "0b7c0958-3f7f-48c8-af3f-31e549b10e31", name: "buzz-control-tower" },
+      { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", name: "just-added", description: "Fresh" },
+    ]);
+
+    expect(merged.configuredChannelIds).toEqual([
+      "0b7c0958-3f7f-48c8-af3f-31e549b10e31",
+      "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    ]);
+    expect(merged.channels).toHaveLength(2);
+    const added = merged.channels.find((channel) => channel.name === "just-added");
+    expect(added).toMatchObject({
+      id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      description: "Fresh",
+      workstreams: [],
+    });
+    // The channel that already had a relay page is untouched.
+    expect(merged.channels[0].id).toBe("0b7c0958-3f7f-48c8-af3f-31e549b10e31");
+    expect(merged.channels[0].workstreams).not.toHaveLength(0);
+  });
+});
 
 describe("companion relay snapshot", () => {
   it("uses an empty unavailable snapshot instead of fixture agents when the relay cannot be read", () => {
