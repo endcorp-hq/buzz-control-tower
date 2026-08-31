@@ -17,6 +17,7 @@ import {
   Link2,
   LockKeyhole,
   Radio,
+  RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
@@ -47,19 +48,23 @@ import { allAgents, countWorkingAgents, findAgent, matchesAgentSearch } from "./
 type DetailTab = "live" | "context" | "evidence" | "artifacts";
 
 const CONNECTED_REFRESH_DELAY_MS = 5_000;
-const UNAVAILABLE_RETRY_DELAY_MS = 15_000;
+export const RELAY_RETRY_DELAYS_MS = [2_000, 5_000, 10_000] as const;
 
-export function refreshDelayFor(connection: DataConnection): number | undefined {
+export function refreshDelayFor(connection: DataConnection, failedAttempts = 0): number | undefined {
   if (connection.state === "connected") return CONNECTED_REFRESH_DELAY_MS;
-  // A temporary relay outage should heal without requiring the operator to
-  // restart the desktop app. Keep setup-required manual so an unauthorised
-  // device does not repeatedly prompt the relay after an operator response.
-  if (connection.state === "error" && connection.retryable) return UNAVAILABLE_RETRY_DELAY_MS;
+  if (connection.state === "error" && connection.retryable) {
+    return RELAY_RETRY_DELAYS_MS[failedAttempts];
+  }
   return undefined;
 }
 
-export function shouldShowRelayRefresh(connection: DataConnection, deviceReady: boolean) {
-  return connection.state === "error" || (connection.state === "setup-required" && deviceReady);
+export function retriesAreExhausted(connection: DataConnection, failedAttempts: number) {
+  return connection.state === "error"
+    && (!connection.retryable || failedAttempts >= RELAY_RETRY_DELAYS_MS.length);
+}
+
+export function shouldShowRelayRefresh(connection: DataConnection, failedAttempts: number) {
+  return retriesAreExhausted(connection, failedAttempts);
 }
 
 const tabs: Array<{ id: DetailTab; label: string; icon: ComponentType<{ size?: number }> }> = [
@@ -88,6 +93,57 @@ function StatusDot({ status, pulse = false }: { status: AgentStatus; pulse?: boo
   return <span className={`status-dot status-${status}${pulse ? " pulse" : ""}`} aria-hidden />;
 }
 
+export function RelayToast({ state }: { state: "reconnecting" | "recovered" | undefined }) {
+  if (!state) return null;
+  const recovered = state === "recovered";
+  return (
+    <div className={`relay-toast${recovered ? " relay-toast-recovered" : ""}`} role="status" aria-live="polite">
+      {recovered ? <Check size={15} /> : <RefreshCw size={15} className="relay-toast-spin" />}
+      <span>{recovered ? "Live updates restored" : "Reconnecting to relay… showing last known data."}</span>
+    </div>
+  );
+}
+
+export function RelayUnavailable({
+  snapshot,
+  connection,
+  onRefresh,
+  deviceReady,
+  onCopyDeviceKey,
+  copyState,
+}: {
+  snapshot: TowerSnapshot;
+  connection: DataConnection;
+  onRefresh: () => void;
+  deviceReady: boolean;
+  onCopyDeviceKey: () => void;
+  copyState: "idle" | "copied" | "failed";
+}) {
+  const needsAuthorization = connection.state === "setup-required";
+  return (
+    <main className="relay-unavailable">
+      <div className="relay-unavailable-icon"><Radio size={23} /></div>
+      <span className="eyebrow">Connection paused</span>
+      <h1>{needsAuthorization ? "Authorize this device" : "Relay unavailable"}</h1>
+      <p>
+        {needsAuthorization
+          ? connection.detail
+          : `Buzz Control Tower cannot reach ${snapshot.relayUrl?.replace(/^wss?:\/\//, "") ?? "the configured relay"}.`}
+      </p>
+      {!needsAuthorization && <p className="relay-error-detail">{connection.detail}</p>}
+      {needsAuthorization && deviceReady ? (
+        <button className="relay-refresh-button" onClick={onCopyDeviceKey}>
+          {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy device key"}
+        </button>
+      ) : !needsAuthorization && (
+        <button className="relay-refresh-button" onClick={onRefresh}>
+          <RefreshCw size={15} /> Refresh now
+        </button>
+      )}
+    </main>
+  );
+}
+
 function App() {
   const [snapshot, setSnapshot] = useState<TowerSnapshot>();
   const [connection, setConnection] = useState<DataConnection>({
@@ -104,6 +160,7 @@ function App() {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ phase: "idle" });
+  const [toast, setToast] = useState<"reconnecting" | "recovered">();
 
   useEffect(() => {
     void stageAppUpdate(setAppUpdate);
@@ -112,12 +169,41 @@ function App() {
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
+    let toastTimer: number | undefined;
+    let failedAttempts = 0;
     const refresh = async () => {
       const result = await dataSource.loadSnapshot();
       if (cancelled) return;
+      if (result.connection.state === "connected") {
+        const recovered = failedAttempts > 0;
+        failedAttempts = 0;
+        setSnapshot(result.snapshot);
+        setConnection(result.connection);
+        if (recovered) {
+          setToast("recovered");
+          toastTimer = window.setTimeout(() => setToast(undefined), 4_000);
+        } else {
+          setToast(undefined);
+        }
+        timer = window.setTimeout(refresh, CONNECTED_REFRESH_DELAY_MS);
+        return;
+      }
+
+      if (result.connection.state === "error" && result.connection.retryable) {
+        const delay = refreshDelayFor(result.connection, failedAttempts);
+        if (delay !== undefined) {
+          failedAttempts += 1;
+          setConnection({ ...result.connection, state: "reconnecting", label: "Reconnecting" });
+          setToast("reconnecting");
+          timer = window.setTimeout(refresh, delay);
+          return;
+        }
+      }
+
+      setToast(undefined);
       setSnapshot(result.snapshot);
       setConnection(result.connection);
-      const delay = refreshDelayFor(result.connection);
+      const delay = refreshDelayFor(result.connection, failedAttempts);
       if (delay !== undefined) timer = window.setTimeout(refresh, delay);
     };
     void refresh();
@@ -125,6 +211,7 @@ function App() {
     return () => {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
+      if (toastTimer !== undefined) window.clearTimeout(toastTimer);
     };
   }, [refreshVersion]);
 
@@ -141,7 +228,7 @@ function App() {
     );
   }
 
-  if (!snapshot || !selectedAgent) {
+  if (!snapshot) {
     return (
       <main className="loading-shell">
         <div className="loading-mark"><Sparkles size={22} /></div>
@@ -149,6 +236,9 @@ function App() {
       </main>
     );
   }
+
+  const relayUnavailable = connection.state === "setup-required"
+    || shouldShowRelayRefresh(connection, RELAY_RETRY_DELAYS_MS.length);
 
   const visibleAgentIds = new Set(
     agents
@@ -199,11 +289,11 @@ function App() {
         <div className="topbar-center">
           <span className="relay-indicator">
             <span className={`relay-pulse${deviceIdentity.status === "error" ? " relay-error" : ""}`} />
-            {deviceIdentity.status === "ready" ? "Device ready" : deviceIdentity.status === "error" ? "Device error" : "Fixture ready"}
+            {deviceIdentity.status === "ready" ? "Device ready" : deviceIdentity.status === "error" ? "Device error" : "Browser preview"}
           </span>
           <span className="topbar-divider" />
           <span className={`source-state source-${connection.state}`}>{connection.label}</span>
-          <span className="snapshot-time">Snapshot {compactTime(snapshot.generatedAt)}</span>
+          <span className="snapshot-time">{connection.state === "reconnecting" ? `Last updated ${compactTime(snapshot.generatedAt)}` : `Snapshot ${compactTime(snapshot.generatedAt)}`}</span>
           {appUpdate.phase === "downloading" && (
             <span className="update-pill">Downloading v{appUpdate.version}…</span>
           )}
@@ -318,19 +408,13 @@ function App() {
                   ? "The OS keyring could not initialize the observer device."
                   : "Preparing a device-only identity for read-only relay access."}
             </span>
-            {shouldShowRelayRefresh(connection, deviceIdentity.status === "ready") && (
+            {connection.state === "setup-required" && deviceIdentity.status === "ready" && !relayUnavailable && (
               <div className="security-actions">
                 {connection.state === "setup-required" && deviceIdentity.status === "ready" && (
                   <button className="copy-device-key" onClick={copyDeviceKey}>
                     {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy device key"}
                   </button>
                 )}
-                <button
-                  className="copy-device-key"
-                  onClick={() => setRefreshVersion((version) => version + 1)}
-                >
-                  {connection.state === "error" ? "Refresh now" : "Retry relay"}
-                </button>
               </div>
             )}
           </div>
@@ -338,6 +422,18 @@ function App() {
       </aside>
 
       <main className="workspace">
+        {relayUnavailable ? (
+          <RelayUnavailable
+            snapshot={snapshot}
+            connection={connection}
+            onRefresh={() => setRefreshVersion((version) => version + 1)}
+            deviceReady={deviceIdentity.status === "ready"}
+            onCopyDeviceKey={copyDeviceKey}
+            copyState={copyState}
+          />
+        ) : !selectedAgent ? (
+          <div className="empty-state"><div><Radio size={18} /></div><h3>No relay activity yet</h3><p>Waiting for signed channel activity from the configured relay.</p></div>
+        ) : <>
         <section className="agent-hero">
           <div className="agent-identity">
             <div className={`agent-glyph glyph-${selectedAgent.status}`}><Code2 size={23} /></div>
@@ -385,7 +481,9 @@ function App() {
           {activeTab === "evidence" && <EvidenceView agent={selectedAgent} />}
           {activeTab === "artifacts" && <ArtifactsView artifacts={selectedAgent.artifacts} />}
         </section>
+        </>}
       </main>
+      <RelayToast state={toast} />
     </div>
   );
 }

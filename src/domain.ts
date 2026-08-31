@@ -88,12 +88,12 @@ export type TowerSnapshot = {
   viewerName: string;
   workspaceName: string;
   relayUrl?: string;
-  source: "fixture" | "relay" | "runtime";
+  source: "fixture" | "relay" | "runtime" | "unavailable";
   channels: Channel[];
 };
 
 export type DataConnection = {
-  state: "fixture" | "connected" | "setup-required" | "error" | "onboarding";
+  state: "fixture" | "connected" | "reconnecting" | "setup-required" | "error" | "onboarding";
   label: string;
   detail: string;
   /** Whether a temporary failure is safe for the UI to retry automatically. */
