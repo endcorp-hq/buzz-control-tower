@@ -92,6 +92,17 @@ export function presentationFromProfile(profile: WorkspaceProfile): WorkspacePre
   };
 }
 
+export function unavailableSnapshot(presentation?: WorkspacePresentation): TowerSnapshot {
+  return {
+    generatedAt: new Date().toISOString(),
+    viewerName: presentation?.viewerName ?? "Operator",
+    workspaceName: presentation?.workspaceName ?? "Control Tower",
+    relayUrl: presentation?.relayUrl,
+    source: "unavailable",
+    channels: [],
+  };
+}
+
 const DEFAULT_PROFILE: WorkspaceProfile = {
   version: 1,
   workspace: "nilor.cool",
@@ -782,11 +793,12 @@ class CompanionDataSource implements TowerDataSource {
       workspace = await invoke<WorkspaceState>("load_workspace_state");
     } catch (error) {
       return {
-        snapshot: structuredClone(fixtureSnapshot),
+        snapshot: unavailableSnapshot(),
         connection: {
           state: "error",
           label: "Workspace profile invalid",
           detail: error instanceof Error ? error.message : String(error),
+          retryable: false,
         },
       };
     }
@@ -955,13 +967,14 @@ class CompanionDataSource implements TowerDataSource {
     const setupRequired = message.includes("authorization required")
       || message.includes("not authorized");
     return {
-      snapshot: structuredClone(fixtureSnapshot),
+      snapshot: unavailableSnapshot(presentation),
       connection: {
         state: setupRequired ? "setup-required" : "error",
         label: setupRequired ? "Authorize device" : "Relay unavailable",
         detail: setupRequired
           ? `Add this device identity to ${profile.relayUrl} and the configured channels to enable signed public activity.`
           : message,
+        retryable: !setupRequired,
       },
     };
   }

@@ -71,8 +71,12 @@ The Tower is intentionally paranoid about what reaches the webview:
   envelopes are fingerprinted, never copied.
 - The Tower holds its own OS-keyring device identity. It **never copies the
   owner's Buzz key**.
-- No live source? It falls back to the signed public message view, then to
-  clearly labeled fixture data. It never fakes altitude.
+- When local or fleet data is unavailable, the Tower falls back to signed
+  public relay events. If a configured relay becomes temporarily unreachable,
+  it keeps the last verified snapshot while retrying; after those retries are
+  exhausted, it shows an explicit unavailable state with a manual refresh.
+  Fixture data is limited to the browser development preview—it never stands
+  in for disconnected production data.
 
 ## 📚 Flight manuals
 

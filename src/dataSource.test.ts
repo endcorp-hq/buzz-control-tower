@@ -9,6 +9,7 @@ import {
   relaySnapshot,
   runtimePagesSnapshot,
   runtimeSnapshot,
+  unavailableSnapshot,
   type AgentTelemetry,
   type ChannelDirectory,
   type RelayActivityPage,
@@ -19,6 +20,25 @@ import {
 } from "./dataSource";
 
 describe("companion relay snapshot", () => {
+  it("uses an empty unavailable snapshot instead of fixture agents when the relay cannot be read", () => {
+    const snapshot = unavailableSnapshot({
+      workspaceName: "Example workspace",
+      viewerName: "Sam",
+      relayUrl: "wss://relay.example",
+      channels: new Map(),
+      authorNames: new Map(),
+      authorRoles: new Map(),
+    });
+
+    expect(snapshot).toMatchObject({
+      workspaceName: "Example workspace",
+      viewerName: "Sam",
+      relayUrl: "wss://relay.example",
+      source: "unavailable",
+      channels: [],
+    });
+  });
+
   it("maps signed public messages without inventing private turn data", () => {
     const page: RelayActivityPage = {
       relayUrl: "wss://buzz.nilor.cool",
