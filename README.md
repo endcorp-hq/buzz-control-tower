@@ -14,6 +14,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/screenshots/hero-live-turn.png" alt="Control Tower watching an agent mid-turn: streaming reply, reasoning stream, and a live tool-call timeline" />
+</p>
+
 Buzz Control Tower is the desktop companion for [Buzz](https://github.com/block/buzz) agent fleets: a
 cockpit view of what every agent is doing **right now** — live activity, context
 provenance, workstreams, and delivery evidence — without ever holding your Buzz
@@ -43,6 +47,40 @@ itself**. Fixes just arrive.
 - **One workspace profile** — every relay, channel, author, and collector
   binding lives in a single profile edited by the deterministic `tower` CLI
   (`docs/ONBOARDING.md`); adding a channel needs no rebuild
+
+## 📸 What you can see
+
+*Screenshots show a staged demo workspace — every name, channel, and relay below is fictional.*
+
+**Evidence, not activity.** The delivery chain tracks the exact path from local
+work to a deployed result — commit, push, and pull request are proven facts;
+merge and deploy are never inferred from agent chatter.
+
+<p align="center">
+  <img src="docs/screenshots/evidence-delivery-chain.png" alt="Evidence tab: a six-stage delivery chain with four stages proven and merge/deploy still pending" />
+</p>
+
+**Inspectable context.** Every source that shaped a turn is listed with its
+hash and size — full content where it is safe to show, and an explicit
+"withheld at source" reason where it is not.
+
+<p align="center">
+  <img src="docs/screenshots/context-manifest.png" alt="Context tab: hashed context sources with an inspector showing safe content for a thread source" />
+</p>
+
+**Watch the agent think.** The live lane streams the reply as it is written,
+with the reasoning stream one click away.
+
+<p align="center">
+  <img src="docs/screenshots/reasoning-stream.png" alt="Live tab with the streaming reply and the reasoning stream expanded" />
+</p>
+
+**Observe any channel in one click.** The work graph lists every channel on
+the relay; adding one to the workspace needs no rebuild.
+
+<p align="center">
+  <img src="docs/screenshots/channel-picker.png" alt="Channel picker open over the work graph, listing relay channels available to observe" />
+</p>
 
 ## 🔧 Flying it from source
 
