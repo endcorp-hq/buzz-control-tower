@@ -26,7 +26,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ComponentType } from "react";
-import { relaunchApp, stageAppUpdate, type AppUpdateState } from "./appUpdate";
+import { relaunchApp, startAppUpdates, type AppUpdateState } from "./appUpdate";
 import { dataSource, MOS_AGENT_PUBKEY } from "./dataSource";
 import {
   loadDeviceIdentity,
@@ -181,9 +181,7 @@ function App() {
   const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ phase: "idle" });
   const [toast, setToast] = useState<"reconnecting" | "recovered">();
 
-  useEffect(() => {
-    void stageAppUpdate(setAppUpdate);
-  }, []);
+  useEffect(() => startAppUpdates(setAppUpdate), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -317,6 +315,9 @@ function App() {
             <button className="update-pill update-ready" onClick={() => void relaunchApp()}>
               v{appUpdate.version} ready — Restart
             </button>
+          )}
+          {appUpdate.phase === "error" && (
+            <span className="update-pill update-error" title={appUpdate.message}>Update check failed</span>
           )}
         </div>
 

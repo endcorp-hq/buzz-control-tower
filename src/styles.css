@@ -61,6 +61,7 @@ button { color: inherit; }
 .update-pill { padding: 3px 10px; border-radius: 999px; border: 1px solid rgba(246, 184, 74, .3); background: rgba(246, 184, 74, .08); color: #f9d28c; font: 11px var(--mono); }
 button.update-ready { cursor: pointer; }
 button.update-ready:hover { background: rgba(246, 184, 74, .18); }
+.update-pill.update-error { border-color: rgba(255, 123, 123, .28); background: rgba(255, 123, 123, .07); color: #d58b8b; }
 
 .viewer-block { display: flex; align-items: center; gap: 10px; padding: 0 20px; }
 .viewer-copy { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: 11px; }
