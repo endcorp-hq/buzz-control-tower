@@ -89,6 +89,18 @@ function compactTime(isoTime: string) {
   }).format(new Date(isoTime));
 }
 
+export function viewerAvatarInitial(viewerName: string) {
+  return viewerName.trim().match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? "?";
+}
+
+export function workspaceSubtitle(workspaceName: string, relayUrl?: string) {
+  const relayHost = relayUrl?.replace(/^wss?:\/\//, "");
+  if (!relayHost || relayHost.toLowerCase() === workspaceName.trim().toLowerCase()) {
+    return workspaceName;
+  }
+  return `${workspaceName} · ${relayHost}`;
+}
+
 function StatusDot({ status, pulse = false }: { status: AgentStatus; pulse?: boolean }) {
   return <span className={`status-dot status-${status}${pulse ? " pulse" : ""}`} aria-hidden />;
 }
@@ -279,10 +291,7 @@ function App() {
           <div className="brand-mark"><Zap size={19} fill="currentColor" /></div>
           <div>
             <div className="brand-name">Control Tower</div>
-            <div className="workspace-name">
-              {snapshot.workspaceName}
-              {snapshot.relayUrl ? ` · ${snapshot.relayUrl.replace(/^wss?:\/\//, "")}` : ""}
-            </div>
+            <div className="workspace-name">{workspaceSubtitle(snapshot.workspaceName, snapshot.relayUrl)}</div>
           </div>
         </div>
 
@@ -306,7 +315,7 @@ function App() {
 
         <div className="viewer-block">
           <div className="viewer-copy"><strong>{snapshot.viewerName}</strong><span>Owner view</span></div>
-          <div className="avatar">LM</div>
+          <div className="avatar" aria-label={`${snapshot.viewerName} avatar`}>{viewerAvatarInitial(snapshot.viewerName)}</div>
         </div>
       </header>
 

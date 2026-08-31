@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import { ContextView, refreshDelayFor, RELAY_RETRY_DELAYS_MS, RelayToast, RelayUnavailable, retriesAreExhausted, shouldShowRelayRefresh } from "./App";
+import { ContextView, refreshDelayFor, RELAY_RETRY_DELAYS_MS, RelayToast, RelayUnavailable, retriesAreExhausted, shouldShowRelayRefresh, viewerAvatarInitial, workspaceSubtitle } from "./App";
 import type { ContextSource, DataConnection, TowerSnapshot } from "./domain";
 
 declare global {
@@ -11,6 +11,19 @@ declare global {
 }
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+describe("header identity", () => {
+  it("uses the viewer's first visible character for the avatar", () => {
+    expect(viewerAvatarInitial("Arjunpotter17")).toBe("A");
+    expect(viewerAvatarInitial("  sam ")).toBe("S");
+  });
+
+  it("does not repeat a relay host that is already the workspace label", () => {
+    expect(workspaceSubtitle("relay.endcorp.co", "wss://relay.endcorp.co")).toBe("relay.endcorp.co");
+    expect(workspaceSubtitle("Control Tower", "wss://relay.endcorp.co"))
+      .toBe("Control Tower · relay.endcorp.co");
+  });
+});
 
 const sources: ContextSource[] = [
   {
