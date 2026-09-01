@@ -34,6 +34,42 @@ Grab the installer for your platform from the
 Install once; the Tower checks the release feed on launch and **updates
 itself**. Fixes just arrive.
 
+## 🗝️ Getting connected
+
+On first launch the Tower generates a **device key** in your OS keyring — a
+read-only observer identity that authenticates signed queries and never signs
+messages. It is *not* your Buzz key, and it starts with no access anywhere.
+Three independent authorizations gate what you can see, and each one is a
+request you (or your relay operator) grant once:
+
+| Layer | What it unlocks | What to ask for |
+|---|---|---|
+| **Relay admission** | The app connects at all | An operator admits the device key as a relay member (`buzz-admin add-member`) |
+| **Channel membership** | A channel appears in the picker; messages, roster, and presence stream | An operator — or any agent in the channel — adds the device key to that channel (`buzz channels add-member`) |
+| **Harness reader list** | The green **Working** lane: live tool calls, streaming replies, evidence | The agent's operator lists the device key in `BUZZ_ACP_OBSERVER_READERS` on the agent's host |
+
+The onboarding flow walks you through the first layer: it shows the device
+key with a copy button, you post it in a Buzz channel (e.g. *"authorize tower
+`3f9c21ab…` please"*), and the screen advances by itself once an operator
+admits it.
+
+Two things that trip people up:
+
+- **Channels are membership-gated per key.** The picker lists only channels
+  the *device key* belongs to — channels you can see in Buzz Desktop under
+  your own identity do not carry over, and a newly created private channel
+  never appears on its own. Each one needs a one-line `add-member` for the
+  device key.
+- **Liveness and telemetry are different signals.** Any agent on the relay
+  shows presence and mid-turn **Active** chips with no setup. The rich
+  **Working** lane only lights up for agents whose harness publishes
+  per-reader encrypted status — and lists your device key as a reader.
+  An agent showing "Online" instead of "Working" usually means its harness
+  doesn't publish status telemetry, not that it is idle.
+
+Revocation is instant: de-admit the device key from the relay and that
+install goes dark.
+
 ## 🗼 What's on the radar
 
 - **Fleet roster** — channel → workstream → agent navigation, one card per agent

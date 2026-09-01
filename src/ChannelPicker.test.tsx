@@ -48,7 +48,7 @@ describe("channel picker", () => {
 
   const flush = () => act(async () => {});
 
-  const render = (onChanged: () => void = () => undefined) => {
+  const render = (onChanged: () => void = () => undefined, devicePubkey?: string) => {
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -57,6 +57,7 @@ describe("channel picker", () => {
       <ChannelPicker
         relayUrl="wss://relay.example"
         configuredChannelIds={["0b7c0958-3f7f-48c8-af3f-31e549b10e31"]}
+        devicePubkey={devicePubkey}
         onChanged={onChanged}
       />,
     ));
@@ -91,6 +92,45 @@ describe("channel picker", () => {
     });
     expect(changed).toBe(1);
     expect(current.querySelector(".channel-picker")).toBeNull();
+  });
+
+  it("explains membership gating and offers the device key when the relay lists nothing", async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "list_relay_channels") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected command ${command}`));
+    });
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.assign(navigator, { clipboard: { writeText } });
+    const current = render(undefined, "86a9bfda00000000000000000000000000000000000000000000000000000000");
+
+    act(() => current.querySelector<HTMLButtonElement>("[aria-label='Add a channel']")?.click());
+    await flush();
+
+    const empty = current.querySelector(".channel-picker-empty");
+    expect(empty?.textContent).toContain("device key");
+    expect(empty?.textContent).toContain("add-member");
+
+    const copy = empty?.querySelector<HTMLButtonElement>(".copy-device-key");
+    expect(copy?.textContent).toContain("Copy device key");
+    act(() => copy?.click());
+    await flush();
+    expect(writeText).toHaveBeenCalledWith("86a9bfda00000000000000000000000000000000000000000000000000000000");
+    expect(copy?.textContent).toContain("Copied");
+  });
+
+  it("hides the copy button without a device key but still explains the gate", async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "list_relay_channels") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected command ${command}`));
+    });
+    const current = render();
+
+    act(() => current.querySelector<HTMLButtonElement>("[aria-label='Add a channel']")?.click());
+    await flush();
+
+    const empty = current.querySelector(".channel-picker-empty");
+    expect(empty?.textContent).toContain("device key");
+    expect(empty?.querySelector(".copy-device-key")).toBeNull();
   });
 
   it("surfaces a rejected add instead of closing silently", async () => {

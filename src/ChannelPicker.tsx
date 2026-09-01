@@ -1,4 +1,4 @@
-import { Plus, RefreshCw, X } from "lucide-react";
+import { Copy, Plus, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 import {
   addWorkspaceChannel,
@@ -30,10 +30,12 @@ function errorMessage(cause: unknown) {
 export function ChannelPicker({
   relayUrl,
   configuredChannelIds,
+  devicePubkey,
   onChanged,
 }: {
   relayUrl: string;
   configuredChannelIds: string[];
+  devicePubkey?: string;
   onChanged: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -42,6 +44,17 @@ export function ChannelPicker({
   const [listed, setListed] = useState<ChannelSummary[]>([]);
   const [error, setError] = useState<string>();
   const [manualChannelId, setManualChannelId] = useState("");
+  const [keyCopied, setKeyCopied] = useState(false);
+
+  const copyDeviceKey = async () => {
+    if (!devicePubkey) return;
+    try {
+      await navigator.clipboard.writeText(devicePubkey);
+      setKeyCopied(true);
+    } catch {
+      // Clipboard denied; the key stays visible in the security footer.
+    }
+  };
 
   const loadChannels = async () => {
     setLoading(true);
@@ -127,12 +140,27 @@ export function ChannelPicker({
                 </button>
               ))}
             </div>
-          ) : (
+          ) : listed.length > 0 ? (
             <p className="channel-picker-note">
-              {listed.length > 0
-                ? "Every channel this device can list is already observed."
-                : "The relay listed no channels for this device."}
+              Every channel this device can list is already observed.
             </p>
+          ) : (
+            <div className="channel-picker-empty">
+              <p>
+                The relay lists only channels where this <strong>device key</strong> is a
+                member — channels you belong to as yourself, including new private
+                channels, never appear on their own.
+              </p>
+              <p>
+                Ask an operator or an agent in the channel to add the device key
+                (<code>buzz channels add-member</code>), then reload.
+              </p>
+              {devicePubkey && (
+                <button type="button" className="copy-device-key" onClick={() => void copyDeviceKey()}>
+                  <Copy size={11} /> {keyCopied ? "Copied" : "Copy device key"}
+                </button>
+              )}
+            </div>
           )}
           <form
             className="channel-picker-manual"
@@ -151,6 +179,9 @@ export function ChannelPicker({
               Add
             </button>
           </form>
+          <p className="channel-picker-hint">
+            A pasted channel streams only once this device key is a member of it too.
+          </p>
           {error && <p className="channel-picker-error">{error}</p>}
         </div>
       )}

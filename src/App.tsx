@@ -13,6 +13,7 @@ import {
   GitBranch,
   GitCommitHorizontal,
   Image,
+  Info,
   Layers3,
   Link2,
   LockKeyhole,
@@ -356,6 +357,7 @@ function App() {
               <ChannelPicker
                 relayUrl={snapshot.relayUrl}
                 configuredChannelIds={configuredChannelIds}
+                devicePubkey={deviceIdentity.status === "ready" ? deviceIdentity.identity.pubkey : undefined}
                 onChanged={() => setRefreshVersion((version) => version + 1)}
               />
             )}
@@ -468,6 +470,37 @@ function App() {
         {channelEditError && (
           <div className="channel-edit-error" role="alert">{channelEditError}</div>
         )}
+
+        <details className="status-legend">
+          <summary><Info size={13} /> What the status chips mean</summary>
+          <ul>
+            <li>
+              <span className="status-dot status-working" />
+              <span><strong>Working</strong> — the agent's harness publishes status telemetry this
+              device is authorized to read: turn title, tool calls, evidence.</span>
+            </li>
+            <li>
+              <span className="status-dot status-active" />
+              <span><strong>Active</strong> — a mid-turn typing heartbeat from a harness that
+              publishes no telemetry. It is busy; the Tower cannot see what with.</span>
+            </li>
+            <li>
+              <span className="status-dot status-idle" />
+              <span><strong>Online / Away</strong> — relay presence only; the harness is up but
+              idle.</span>
+            </li>
+            <li>
+              <span className="status-dot status-offline" />
+              <span><strong>Offline</strong> — presence gone and nothing signed in the lookback
+              window.</span>
+            </li>
+          </ul>
+          <p>
+            Working requires the agent's harness to list this device key as an
+            observer-reader (<code>BUZZ_ACP_OBSERVER_READERS</code>) — ask the agent's
+            operator to authorize it.
+          </p>
+        </details>
 
         <div className="security-note">
           <LockKeyhole size={15} />
