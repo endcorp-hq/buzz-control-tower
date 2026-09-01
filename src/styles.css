@@ -139,6 +139,8 @@ button.update-ready:hover { background: rgba(246, 184, 74, .18); }
 .status-blocked { background: var(--red); box-shadow: 0 0 9px rgba(255, 123, 123, .24); }
 .status-complete { background: #8ba9ff; }
 .status-idle { background: #666b75; }
+.status-active { background: var(--amber); box-shadow: 0 0 9px rgba(246, 184, 74, .3); }
+.status-offline { background: #3f434b; }
 .pulse { animation: pulse 2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .45; } }
 .helper-count { display: flex; align-items: center; gap: 3px; color: #777d86; font: 8px var(--mono); }
@@ -157,6 +159,7 @@ button.update-ready:hover { background: rgba(246, 184, 74, .18); }
 .agent-identity { display: flex; align-items: center; gap: 18px; min-width: 0; }
 .agent-glyph { width: 52px; height: 52px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 14px; border: 1px solid var(--line); background: linear-gradient(145deg, #1d2027, #121419); color: #8e949f; }
 .glyph-working { color: var(--amber); border-color: rgba(246,184,74,.19); box-shadow: inset 0 0 22px rgba(246,184,74,.035); }
+.glyph-active { color: var(--amber); border-color: rgba(246,184,74,.13); }
 .glyph-blocked { color: var(--red); border-color: rgba(255,123,123,.18); }
 .agent-meta { display: flex; gap: 7px; margin-bottom: 5px; color: #747a85; font: 9px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
 .agent-identity h1 { overflow: hidden; margin: 0 0 8px; color: #f0f1f4; font: 600 27px var(--mono); letter-spacing: -.045em; text-overflow: ellipsis; }

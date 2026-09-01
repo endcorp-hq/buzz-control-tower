@@ -240,11 +240,19 @@ export type ObserverAgentStream = {
   entries: RichEntry[];
 };
 
+export type TypingHeartbeat = {
+  agentPubkey: string;
+  channelId: string;
+  /** Unix seconds (companion clock) when the heartbeat was received. */
+  seenAt: number;
+};
+
 export type ObserverStreamsPage = {
   relayUrl: string;
   connected: boolean;
   lastError?: string | null;
   agents: ObserverAgentStream[];
+  typing?: TypingHeartbeat[];
 };
 
 export type ObserverStreams = Map<string, ObserverAgentStream>;
@@ -253,6 +261,43 @@ export function observerStreamsByAgent(page: ObserverStreamsPage | undefined): O
   const byAgent: ObserverStreams = new Map();
   for (const agent of page?.agents ?? []) byAgent.set(agent.agentPubkey, agent);
   return byAgent;
+}
+
+export type PresenceEntry = { pubkey: string; status: string };
+export type PresencePage = { statuses: PresenceEntry[] };
+
+/** Typing heartbeats stay "active" this long — 3× the harness's ~3 s refresh,
+ * so one dropped ephemeral event does not flicker the chip. */
+export const TYPING_ACTIVE_WINDOW_S = 10;
+
+/**
+ * Stock-harness liveness signals: typing heartbeats keyed channel → pubkey →
+ * seen-at, and relay presence keyed pubkey → status. Both are best-effort
+ * enrichments for agents whose harness publishes no work-status telemetry.
+ */
+export type LiveSignals = {
+  typing?: Map<string, Map<string, number>>;
+  presence?: Map<string, string>;
+  /** Test injection point; defaults to Date.now(). */
+  nowMs?: number;
+};
+
+export function typingByChannel(
+  page: ObserverStreamsPage | undefined,
+): Map<string, Map<string, number>> {
+  const byChannel = new Map<string, Map<string, number>>();
+  for (const heartbeat of page?.typing ?? []) {
+    let channel = byChannel.get(heartbeat.channelId);
+    if (!channel) {
+      channel = new Map();
+      byChannel.set(heartbeat.channelId, channel);
+    }
+    const existing = channel.get(heartbeat.agentPubkey);
+    if (existing === undefined || heartbeat.seenAt > existing) {
+      channel.set(heartbeat.agentPubkey, heartbeat.seenAt);
+    }
+  }
+  return byChannel;
 }
 
 export type RuntimeActivity = {
@@ -458,17 +503,35 @@ function relayAgentCard(
   presentation: WorkspacePresentation,
   telemetry?: AgentTelemetry,
   observer?: ObserverAgentStream,
+  signals?: LiveSignals,
 ) {
   const newest = messages.at(-1);
+  const nowMs = signals?.nowMs ?? Date.now();
   const live = telemetry?.status === "working";
   const lingering =
     telemetry?.status === "complete" &&
-    Date.now() - telemetry.eventCreatedAt * 1000 <= COMPLETE_TURN_LINGER_MS;
+    nowMs - telemetry.eventCreatedAt * 1000 <= COMPLETE_TURN_LINGER_MS;
+  // Telemetry is the agent's own trusted summary and always wins. Without it,
+  // fall back to the stock-harness liveness ladder: a fresh typing heartbeat
+  // means mid-turn now; relay presence separates "online but idle" from
+  // "harness gone"; an agent that is neither present nor recently signed
+  // dims to offline.
+  const typingSeenAt = signals?.typing?.get(channelId)?.get(pubkey);
+  const typingActive =
+    typingSeenAt !== undefined && nowMs / 1000 - typingSeenAt <= TYPING_ACTIVE_WINDOW_S;
+  const presence = signals?.presence?.get(pubkey);
+  const liveSignalCard = typingActive
+    ? { status: "active" as const, statusLabel: "Active" }
+    : presence === "online" || presence === "away"
+      ? { status: "idle" as const, statusLabel: presence === "away" ? "Away" : "Online" }
+      : presence === "offline" || (signals?.presence && !newest)
+        ? { status: "offline" as const, statusLabel: "Offline" }
+        : undefined;
   const card = telemetry
     ? telemetry.status === "complete" && !lingering
       ? TELEMETRY_STATUS_CARD.idle
       : TELEMETRY_STATUS_CARD[telemetry.status]
-    : undefined;
+    : liveSignalCard;
   // The decrypted rich lane supersedes the redacted telemetry activity list
   // (every telemetry title also exists as a richer entry); telemetry still
   // owns card status, model, and timings — it is the agent's own summary.
@@ -494,15 +557,19 @@ function relayAgentCard(
     status: (card?.status ?? "idle") as AgentStatus,
     statusLabel: card?.statusLabel ?? (newest ? "Relay visible" : "Quiet"),
     operation: newestTelemetry?.title
-      ?? (newest
-        ? "Showing signed public channel updates"
-        : "No signed channel events in the last 24 hours"),
+      ?? (typingActive && !telemetry
+        ? "Mid-turn now — no status telemetry feed from this participant"
+        : newest
+          ? "Showing signed public channel updates"
+          : "No signed channel events in the last 24 hours"),
     elapsed,
     lastActivity: telemetry?.updatedAt
       ? new Date(telemetry.updatedAt).toLocaleTimeString()
-      : newest
-        ? new Date(newest.createdAt * 1000).toLocaleTimeString()
-        : "No recent events",
+      : typingActive && !telemetry
+        ? "Active now"
+        : newest
+          ? new Date(newest.createdAt * 1000).toLocaleTimeString()
+          : "No recent events",
     model: telemetry?.model ?? "Not exposed",
     branch: "Not exposed",
     head: "Not exposed",
@@ -530,6 +597,7 @@ export function relayPagesSnapshot(
   rosters?: ChannelRosters,
   telemetryPages?: TelemetryPages,
   observerStreams?: ObserverStreams,
+  signals?: LiveSignals,
 ): TowerSnapshot {
   const channels: TowerSnapshot["channels"] = [];
   for (const page of pages) {
@@ -542,7 +610,7 @@ export function relayPagesSnapshot(
     const agents = pubkeys.map((pubkey) =>
       relayAgentCard(page.channelId, pubkey, byAuthor.get(pubkey) ?? [], presentation,
         channelTelemetry(telemetryPages, page.channelId, pubkey),
-        channelObserverStream(observerStreams, page.channelId, pubkey)));
+        channelObserverStream(observerStreams, page.channelId, pubkey), signals));
     channels.push({
       id: page.channelId,
       name: meta.name,
@@ -614,6 +682,7 @@ export function runtimePagesSnapshot(
   relayPages?: Map<string, RelayActivityPage>,
   telemetryPages?: TelemetryPages,
   observerStreams?: ObserverStreams,
+  signals?: LiveSignals,
 ): TowerSnapshot {
   const channels = new Map<string, TowerSnapshot["channels"][number]>();
   const ensureChannel = (channelId: string) => {
@@ -722,7 +791,7 @@ export function runtimePagesSnapshot(
       agents: quiet.map((pubkey) =>
         relayAgentCard(channelId, pubkey, byAuthor.get(pubkey) ?? [], presentation,
           channelTelemetry(telemetryPages, channelId, pubkey),
-          channelObserverStream(observerStreams, channelId, pubkey))),
+          channelObserverStream(observerStreams, channelId, pubkey), signals)),
     });
   }
 
@@ -878,6 +947,15 @@ class CompanionDataSource implements TowerDataSource {
     const observerStreams = observerStreamsByAgent(
       observerPage.status === "fulfilled" ? observerPage.value : undefined,
     );
+    const signals: LiveSignals = {
+      typing: typingByChannel(
+        observerPage.status === "fulfilled" ? observerPage.value : undefined,
+      ),
+    };
+    // Populated lazily on the first successful presence read: an outage must
+    // leave `presence` undefined so quiet cards degrade to the old neutral
+    // "Quiet" instead of all dimming to a false "Offline".
+    const presenceStatuses = new Map<string, string>();
 
     const [localRuntime, remoteFleet] = await Promise.allSettled([
       profile.localRuntime
@@ -927,11 +1005,11 @@ class CompanionDataSource implements TowerDataSource {
         presentation.authorRoles.set(pubkey, role);
       }
       if (roster.authorPubkeys.length === 0) return;
-      // Fetch signed activity and agent work-status telemetry side by side.
-      // Telemetry is best-effort: its failure alone degrades silently to
-      // un-enriched cards; only a channel where both reads fail surfaces a
-      // failure note.
-      const [activity, telemetry] = await Promise.allSettled([
+      // Fetch signed activity, agent work-status telemetry, and relay
+      // presence side by side. Telemetry and presence are best-effort: their
+      // failure alone degrades silently to un-enriched cards; only a channel
+      // where the activity read also fails surfaces a failure note.
+      const [activity, telemetry, presence] = await Promise.allSettled([
         invoke<RelayActivityPage>("load_channel_activity", {
           relayUrl: profile.relayUrl,
           channelId: channel.id,
@@ -944,12 +1022,22 @@ class CompanionDataSource implements TowerDataSource {
           channelId: channel.id,
           authorPubkeys: roster.authorPubkeys,
         }),
+        invoke<PresencePage>("load_presence", {
+          relayUrl: profile.relayUrl,
+          pubkeys: roster.authorPubkeys,
+        }),
       ]);
       if (activity.status === "fulfilled") {
         relayPages.set(channel.id, activity.value);
       }
       if (telemetry.status === "fulfilled") {
         telemetryPages.set(channel.id, telemetry.value);
+      }
+      if (presence.status === "fulfilled") {
+        signals.presence = presenceStatuses;
+        for (const entry of presence.value.statuses) {
+          presenceStatuses.set(entry.pubkey, entry.status);
+        }
       }
       if (activity.status === "rejected") {
         relayFailures.push(
@@ -986,7 +1074,7 @@ class CompanionDataSource implements TowerDataSource {
       return {
         snapshot: withConfiguredChannels(runtimePagesSnapshot(
           sources, remoteDocument?.errors, presentation, rosters, relayPages, telemetryPages,
-          observerStreams), profile.channels),
+          observerStreams, signals), profile.channels),
         connection: {
           state: "connected",
           label: hasRemote && hasLocal ? "Fleet + local" : hasRemote ? "Agent fleet" : "Local runtime",
@@ -998,8 +1086,8 @@ class CompanionDataSource implements TowerDataSource {
     if (relayPages.size > 0) {
       return {
         snapshot: withConfiguredChannels(relayPagesSnapshot(
-          [...relayPages.values()], presentation, rosters, telemetryPages, observerStreams),
-          profile.channels),
+          [...relayPages.values()], presentation, rosters, telemetryPages, observerStreams,
+          signals), profile.channels),
         connection: {
           state: "connected",
           label: "Public relay",

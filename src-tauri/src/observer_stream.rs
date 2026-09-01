@@ -25,6 +25,11 @@ use serde_json::{json, Value};
 
 const OBSERVER_FRAME_KIND: u16 = 24_200;
 const SHARED_OBSERVER_FRAME_KIND: u16 = 24_201;
+/// Ephemeral typing heartbeat every buzz-acp harness re-publishes every ~3
+/// seconds while a turn is in flight (empty content, `h` tag = channel UUID).
+/// Rides the relay's channel ephemeral fan-out, so the filter must name the
+/// channel in `#h` (verified live against buzz.nilor.cool 2026-09-01).
+const TYPING_KIND: u16 = 20_002;
 const SUBSCRIPTION_ID: &str = "tower-rich-lane";
 
 /// NIP-44 v2 ciphertext length envelope (mirrors the relay's own bounds).
@@ -34,6 +39,9 @@ const NIP44_MAX_CONTENT_LEN: usize = 87_472;
 const MAX_PLAINTEXT_BYTES: usize = 65_535;
 
 const MAX_AGENTS: usize = 64;
+const MAX_TYPING_ENTRIES: usize = 128;
+/// A typing key idle this long is evicted when the map is full.
+const TYPING_EVICT_SECS: u64 = 60;
 const MAX_CHANNEL_FILTERS: usize = 32;
 const MAX_ENTRIES_PER_AGENT: usize = 200;
 const MAX_LIVE_TEXT_BYTES: usize = 16_384;
@@ -95,6 +103,17 @@ pub struct ObserverAgentStream {
     pub stream: AgentStream,
 }
 
+/// One "this author is mid-turn in this channel" observation, stamped with
+/// this process's clock at receipt so the frontend can age it locally.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TypingHeartbeat {
+    pub agent_pubkey: String,
+    pub channel_id: String,
+    /// Unix seconds (local clock) when the heartbeat was received.
+    pub seen_at: u64,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObserverStreamsPage {
@@ -103,6 +122,7 @@ pub struct ObserverStreamsPage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
     pub agents: Vec<ObserverAgentStream>,
+    pub typing: Vec<TypingHeartbeat>,
 }
 
 #[derive(Default)]
@@ -113,6 +133,8 @@ struct StoreInner {
     connected: bool,
     last_error: Option<String>,
     agents: HashMap<String, AgentStream>,
+    /// (author pubkey, channel id) → last heartbeat receipt, unix seconds.
+    typing: HashMap<(String, String), u64>,
 }
 
 #[derive(Clone, Default)]
@@ -160,6 +182,7 @@ impl ObserverStreamStore {
             inner.connected = false;
             inner.last_error = None;
             inner.agents.clear();
+            inner.typing.clear();
         }
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let store = self.clone();
@@ -188,11 +211,22 @@ impl ObserverStreamStore {
             })
             .collect();
         agents.sort_by_key(|agent| std::cmp::Reverse(agent.stream.updated_at));
+        let mut typing: Vec<TypingHeartbeat> = inner
+            .typing
+            .iter()
+            .map(|((pubkey, channel), seen_at)| TypingHeartbeat {
+                agent_pubkey: pubkey.clone(),
+                channel_id: channel.clone(),
+                seen_at: *seen_at,
+            })
+            .collect();
+        typing.sort_by_key(|heartbeat| std::cmp::Reverse(heartbeat.seen_at));
         Ok(ObserverStreamsPage {
             relay_url: inner.relay_url.clone(),
             connected: inner.connected,
             last_error: inner.last_error.clone(),
             agents,
+            typing,
         })
     }
 
@@ -226,6 +260,29 @@ impl ObserverStreamStore {
             apply_frame(&mut inner, agent_pubkey, frame);
         }
     }
+
+    fn apply_typing(&self, generation: u64, agent_pubkey: &str, channel_id: &str) {
+        if self.generation.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        if let Ok(mut inner) = self.inner.lock() {
+            record_typing(&mut inner, agent_pubkey, channel_id, now_unix());
+        }
+    }
+}
+
+/// Record a typing heartbeat, bounding the map by evicting idle keys first
+/// and dropping the new observation if the map is still full of fresh ones.
+fn record_typing(inner: &mut StoreInner, agent_pubkey: &str, channel_id: &str, now: u64) {
+    let key = (agent_pubkey.to_string(), channel_id.to_string());
+    if inner.typing.len() >= MAX_TYPING_ENTRIES && !inner.typing.contains_key(&key) {
+        let cutoff = now.saturating_sub(TYPING_EVICT_SECS);
+        inner.typing.retain(|_, seen_at| *seen_at > cutoff);
+        if inner.typing.len() >= MAX_TYPING_ENTRIES {
+            return;
+        }
+    }
+    inner.typing.insert(key, now);
 }
 
 fn now_unix() -> u64 {
@@ -744,10 +801,12 @@ async fn send_json(ws: &mut WsStream, value: &Value) -> Result<(), String> {
         .map_err(|error| format!("relay send failed: {error}"))
 }
 
-/// Two filters: owner-scoped kind-24200 frames route globally and are matched
-/// by `#p` alone, while channel-scoped kind-24201 copies ride the relay's
-/// channel fan-out index — a subscription only matches them when it names the
-/// channel in `#h` (verified live against buzz.nilor.cool 2026-08-23).
+/// Three filters: owner-scoped kind-24200 frames route globally and are
+/// matched by `#p` alone, while channel-scoped kind-24201 copies and kind-20002
+/// typing heartbeats ride the relay's channel fan-out index — a subscription
+/// only matches them when it names the channel in `#h` (24201 verified live
+/// against buzz.nilor.cool 2026-08-23, 20002 on 2026-09-01). Typing carries no
+/// `p` tag: every channel author's heartbeat is visible to channel members.
 fn subscription_filters(pubkey_hex: &str, channels: &[String]) -> Vec<Value> {
     let mut filters = vec![json!({
         "kinds": [OBSERVER_FRAME_KIND],
@@ -757,6 +816,10 @@ fn subscription_filters(pubkey_hex: &str, channels: &[String]) -> Vec<Value> {
         filters.push(json!({
             "kinds": [SHARED_OBSERVER_FRAME_KIND],
             "#p": [pubkey_hex],
+            "#h": channels,
+        }));
+        filters.push(json!({
+            "kinds": [TYPING_KIND],
             "#h": channels,
         }));
     }
@@ -777,6 +840,15 @@ fn handle_relay_text(store: &ObserverStreamStore, keys: &Keys, generation: u64, 
         return;
     };
     let kind = event.kind.as_u16();
+    if kind == TYPING_KIND {
+        if event.verify().is_err() {
+            return;
+        }
+        if let Some(channel_id) = typing_channel(&event) {
+            store.apply_typing(generation, &event.pubkey.to_hex(), &channel_id);
+        }
+        return;
+    }
     if kind != OBSERVER_FRAME_KIND && kind != SHARED_OBSERVER_FRAME_KIND {
         return;
     }
@@ -804,6 +876,21 @@ fn handle_relay_text(store: &ObserverStreamStore, keys: &Keys, generation: u64, 
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| event.pubkey.to_hex());
     store.apply(generation, &agent_pubkey, &frame);
+}
+
+/// The channel a typing heartbeat belongs to. A heartbeat is a signed
+/// kind-20002 event with empty content and a single `h` tag; anything with
+/// content is not a typing heartbeat and is ignored.
+fn typing_channel(event: &Event) -> Option<String> {
+    if !event.content.is_empty() {
+        return None;
+    }
+    event
+        .tags
+        .iter()
+        .find(|tag| tag.kind().to_string() == "h")
+        .and_then(|tag| tag.content())
+        .map(ToOwned::to_owned)
 }
 
 #[cfg(test)]
@@ -974,7 +1061,7 @@ mod tests {
     #[test]
     fn subscription_filters_split_owner_and_channel_lanes() {
         let filters = subscription_filters("ab".repeat(32).as_str(), &["chan-1".to_string()]);
-        assert_eq!(filters.len(), 2);
+        assert_eq!(filters.len(), 3);
         assert_eq!(filters[0]["kinds"][0], OBSERVER_FRAME_KIND);
         assert!(
             filters[0].get("#h").is_none(),
@@ -983,9 +1070,82 @@ mod tests {
         assert_eq!(filters[1]["kinds"][0], SHARED_OBSERVER_FRAME_KIND);
         assert_eq!(filters[1]["#h"][0], "chan-1");
         assert_eq!(filters[1]["#p"][0], filters[0]["#p"][0]);
+        assert_eq!(filters[2]["kinds"][0], TYPING_KIND);
+        assert_eq!(filters[2]["#h"][0], "chan-1");
+        assert!(
+            filters[2].get("#p").is_none(),
+            "typing heartbeats are not addressed to the observer"
+        );
 
         let no_channels = subscription_filters("ab", &[]);
         assert_eq!(no_channels.len(), 1, "no channel filter without channels");
+    }
+
+    #[test]
+    fn typing_channel_requires_empty_content_and_h_tag() {
+        use nostr::{EventBuilder, Keys, Kind, Tag};
+        let keys = Keys::generate();
+        let typing = EventBuilder::new(Kind::Custom(TYPING_KIND), "")
+            .tags([
+                Tag::parse(["h", "0b7c0958-3f7f-48c8-af3f-31e549b10e31"]).expect("h tag"),
+                Tag::parse(["e", "ab".repeat(32).as_str(), "", "reply"]).expect("e tag"),
+            ])
+            .sign_with_keys(&keys)
+            .expect("signed typing event");
+        assert_eq!(
+            typing_channel(&typing).as_deref(),
+            Some("0b7c0958-3f7f-48c8-af3f-31e549b10e31")
+        );
+
+        let with_content = EventBuilder::new(Kind::Custom(TYPING_KIND), "not typing")
+            .tags([Tag::parse(["h", "chan"]).expect("h tag")])
+            .sign_with_keys(&keys)
+            .expect("signed event");
+        assert!(typing_channel(&with_content).is_none());
+
+        let no_channel = EventBuilder::new(Kind::Custom(TYPING_KIND), "")
+            .sign_with_keys(&keys)
+            .expect("signed event");
+        assert!(typing_channel(&no_channel).is_none());
+    }
+
+    #[test]
+    fn typing_heartbeats_surface_in_the_snapshot_newest_first() {
+        let store = ObserverStreamStore::default();
+        {
+            let mut inner = store.inner.lock().unwrap();
+            record_typing(&mut inner, "agent-a", "chan-1", 100);
+            record_typing(&mut inner, "agent-b", "chan-1", 200);
+            record_typing(&mut inner, "agent-a", "chan-2", 300);
+            // A repeat heartbeat refreshes the same key instead of duplicating.
+            record_typing(&mut inner, "agent-a", "chan-1", 400);
+        }
+        let page = store.snapshot().unwrap();
+        assert_eq!(page.typing.len(), 3);
+        assert_eq!(page.typing[0].agent_pubkey, "agent-a");
+        assert_eq!(page.typing[0].channel_id, "chan-1");
+        assert_eq!(page.typing[0].seen_at, 400);
+    }
+
+    #[test]
+    fn typing_map_evicts_idle_keys_when_full() {
+        let mut inner = StoreInner::default();
+        for index in 0..MAX_TYPING_ENTRIES {
+            record_typing(&mut inner, &format!("stale-{index}"), "chan", 100);
+        }
+        // All existing keys are older than the eviction window at now=1000.
+        record_typing(&mut inner, "fresh", "chan", 1_000);
+        assert_eq!(inner.typing.len(), 1);
+        assert!(inner.typing.contains_key(&("fresh".to_string(), "chan".to_string())));
+
+        // A full map of fresh keys drops the newcomer instead of evicting.
+        for index in 0..MAX_TYPING_ENTRIES {
+            record_typing(&mut inner, &format!("busy-{index}"), "chan", 1_000);
+        }
+        record_typing(&mut inner, "dropped", "chan", 1_001);
+        assert!(!inner
+            .typing
+            .contains_key(&("dropped".to_string(), "chan".to_string())));
     }
 
     #[test]

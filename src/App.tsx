@@ -80,6 +80,8 @@ const statusLabels: Record<AgentStatus, string> = {
   blocked: "Blocked",
   idle: "Idle",
   complete: "Complete",
+  active: "Active",
+  offline: "Offline",
 };
 
 function compactTime(isoTime: string) {
@@ -442,7 +444,7 @@ function App() {
                               className={`agent-row${selectedId === agent.id ? " selected" : ""}`}
                               onClick={() => selectAgent(agent.id)}
                             >
-                              <StatusDot status={agent.status} pulse={agent.status === "working"} />
+                              <StatusDot status={agent.status} pulse={agent.status === "working" || agent.status === "active"} />
                               <span className="agent-row-copy">
                                 <strong>{agent.agentName}</strong>
                                 <span>{agent.operation}</span>
@@ -501,7 +503,7 @@ function App() {
             <div>
               <div className="agent-meta"><span>{selectedAgent.role}</span><span>•</span><span>{selectedAgent.model}</span></div>
               <h1>{selectedAgent.agentName}</h1>
-              <div className="operation-line"><StatusDot status={selectedAgent.status} pulse={selectedAgent.status === "working"} /><strong>{selectedAgent.statusLabel}</strong><span>{selectedAgent.operation}</span></div>
+              <div className="operation-line"><StatusDot status={selectedAgent.status} pulse={selectedAgent.status === "working" || selectedAgent.status === "active"} /><strong>{selectedAgent.statusLabel}</strong><span>{selectedAgent.operation}</span></div>
             </div>
           </div>
 

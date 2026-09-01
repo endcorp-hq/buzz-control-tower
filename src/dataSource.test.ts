@@ -9,8 +9,11 @@ import {
   relaySnapshot,
   runtimePagesSnapshot,
   runtimeSnapshot,
+  typingByChannel,
+  TYPING_ACTIVE_WINDOW_S,
   unavailableSnapshot,
   type AgentTelemetry,
+  type LiveSignals,
   type ChannelDirectory,
   type RelayActivityPage,
   type ObserverStreamsPage,
@@ -805,5 +808,118 @@ describe("companion rich lane", () => {
     const byAgent = observerStreamsByAgent(observerPage);
     expect(byAgent.get(agentPubkey)?.liveText).toBe("Deploying the fix now.");
     expect(observerStreamsByAgent(undefined).size).toBe(0);
+  });
+});
+
+describe("stock-harness liveness signals", () => {
+  const channelId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  const agentPubkey = "6".repeat(64);
+  const nowMs = 1_800_000_000_000;
+
+  const quietPage = (): RelayActivityPage => ({
+    relayUrl: "wss://buzz.example.org",
+    channelId,
+    devicePubkey: "a".repeat(64),
+    messages: [],
+  });
+  const rosters = () => new Map([[channelId, {
+    authorPubkeys: [agentPubkey],
+    authorNames: new Map([[agentPubkey, "stock-agent"]]),
+    authorRoles: new Map<string, string>(),
+  }]]);
+  const cardWith = (signals: LiveSignals, page = quietPage()) =>
+    relayPagesSnapshot([page], undefined, rosters(), undefined, undefined, signals)
+      .channels[0].workstreams[0].agents[0];
+
+  it("collects typing heartbeats per channel with the newest sighting winning", () => {
+    const page: ObserverStreamsPage = {
+      relayUrl: "wss://buzz.example.org",
+      connected: true,
+      agents: [],
+      typing: [
+        { agentPubkey, channelId, seenAt: 100 },
+        { agentPubkey, channelId, seenAt: 300 },
+        { agentPubkey, channelId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", seenAt: 200 },
+      ],
+    };
+    const byChannel = typingByChannel(page);
+    expect(byChannel.get(channelId)?.get(agentPubkey)).toBe(300);
+    expect(byChannel.get("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")?.get(agentPubkey)).toBe(200);
+    expect(typingByChannel(undefined).size).toBe(0);
+  });
+
+  it("marks a fresh typing heartbeat as active without inventing telemetry", () => {
+    const typing = new Map([[channelId, new Map([[agentPubkey, nowMs / 1000 - 4]])]]);
+    const agent = cardWith({ typing, nowMs });
+
+    expect(agent.status).toBe("active");
+    expect(agent.statusLabel).toBe("Active");
+    expect(agent.operation).toContain("Mid-turn now");
+    expect(agent.lastActivity).toBe("Active now");
+    expect(agent.model).toBe("Not exposed");
+    expect(agent.activity).toEqual([]);
+  });
+
+  it("expires a stale typing heartbeat down the presence ladder", () => {
+    const typing = new Map([[channelId, new Map([[agentPubkey,
+      nowMs / 1000 - TYPING_ACTIVE_WINDOW_S - 1]])]]);
+    const online = cardWith({ typing, presence: new Map([[agentPubkey, "online"]]), nowMs });
+    expect(online.status).toBe("idle");
+    expect(online.statusLabel).toBe("Online");
+
+    const away = cardWith({ presence: new Map([[agentPubkey, "away"]]), nowMs });
+    expect(away.statusLabel).toBe("Away");
+  });
+
+  it("dims quiet agents to offline only when presence actually resolved", () => {
+    const offline = cardWith({ presence: new Map([[agentPubkey, "offline"]]), nowMs });
+    expect(offline.status).toBe("offline");
+    expect(offline.statusLabel).toBe("Offline");
+
+    const absent = cardWith({ presence: new Map(), nowMs });
+    expect(absent.status).toBe("offline");
+
+    // No presence data at all (fetch failed) keeps the old neutral card.
+    const unknown = cardWith({ nowMs });
+    expect(unknown.status).toBe("idle");
+    expect(unknown.statusLabel).toBe("Quiet");
+  });
+
+  it("dims presence-offline speakers while keeping their signed activity", () => {
+    const page = quietPage();
+    page.messages.push({
+      id: "b".repeat(64),
+      pubkey: agentPubkey,
+      kind: 9,
+      createdAt: 1_800_000_000,
+      content: "Recent update",
+    });
+    const agent = cardWith({ presence: new Map([[agentPubkey, "offline"]]), nowMs }, page);
+    expect(agent.status).toBe("offline");
+    expect(agent.statusLabel).toBe("Offline");
+    expect(agent.activity).toHaveLength(1);
+
+    const noPresenceEntry = cardWith({ presence: new Map(), nowMs }, page);
+    expect(noPresenceEntry.status).toBe("idle");
+    expect(noPresenceEntry.statusLabel).toBe("Relay visible");
+  });
+
+  it("lets real telemetry win over every liveness signal", () => {
+    const telemetryPages = new Map([[channelId, {
+      channelId,
+      statuses: [{
+        pubkey: agentPubkey,
+        eventCreatedAt: nowMs / 1000,
+        status: "working" as const,
+        activity: [],
+      }],
+    }]]);
+    const typing = new Map([[channelId, new Map([[agentPubkey, nowMs / 1000]])]]);
+    const snapshot = relayPagesSnapshot([quietPage()], undefined, rosters(), telemetryPages,
+      undefined, { typing, presence: new Map([[agentPubkey, "offline"]]), nowMs });
+    const agent = snapshot.channels[0].workstreams[0].agents[0];
+
+    expect(agent.status).toBe("working");
+    expect(agent.statusLabel).toBe("Working");
   });
 });

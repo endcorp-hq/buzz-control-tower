@@ -1,4 +1,12 @@
-export type AgentStatus = "working" | "blocked" | "idle" | "complete";
+export type AgentStatus =
+  | "working"
+  | "blocked"
+  | "idle"
+  | "complete"
+  /** Mid-turn typing heartbeat seen, but the harness publishes no telemetry. */
+  | "active"
+  /** Presence reports offline, or nothing signed in the lookback window. */
+  | "offline";
 
 export type DeliveryStage =
   | "local"

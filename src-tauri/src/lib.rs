@@ -3,6 +3,7 @@ mod channel_telemetry;
 mod device_identity;
 mod local_workstream;
 mod observer_stream;
+mod presence;
 mod relay_activity;
 mod remote_workstream;
 mod workspace_profile;
@@ -62,6 +63,16 @@ async fn load_channel_telemetry(
 ) -> Result<channel_telemetry::RelayTelemetryPage, String> {
     let (keys, _) = state.keys()?;
     channel_telemetry::load_channel_telemetry(&keys, &relay_url, &channel_id, &author_pubkeys).await
+}
+
+#[tauri::command]
+async fn load_presence(
+    state: State<'_, device_identity::DeviceIdentityStore>,
+    relay_url: String,
+    pubkeys: Vec<String>,
+) -> Result<presence::PresencePage, String> {
+    let (keys, _) = state.keys()?;
+    presence::load_presence(&keys, &relay_url, &pubkeys).await
 }
 
 #[tauri::command]
@@ -178,6 +189,7 @@ pub fn run() {
             start_observer_stream,
             load_observer_streams,
             load_channel_telemetry,
+            load_presence,
             load_local_workstream,
             load_fleet_workstreams,
             load_workspace_state,
