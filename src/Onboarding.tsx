@@ -2,6 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { Hash, KeyRound, Radio, RefreshCw, Sparkles, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { addWorkspace, type ChannelDirectory, type ChannelSummary } from "./dataSource";
+import { AuthorizeHelp } from "./AuthorizeHelp";
 import { importDeviceIdentity, type DeviceIdentityState } from "./deviceIdentity";
 
 type OnboardingPhase = "relay" | "authorize" | "channels";
@@ -291,8 +292,9 @@ export function Onboarding({
           <div className="onboarding-authorize">
             <p>
               <strong>{relayHost(activeRelay.current)}</strong> does not recognize this device yet.
-              Post the read-only device key below in your Buzz channel and ask an agent to
-              authorize it; once it is admitted, this screen advances automatically.
+              Whoever runs that relay (its operator, or an agent on the relay host) needs to admit
+              the read-only key below. Send them the ready-made request underneath; once the key is
+              admitted, this screen advances automatically.
             </p>
             {deviceIdentity.status === "ready" ? (
               <code className="onboarding-key">{deviceIdentity.identity.pubkey}</code>
@@ -313,6 +315,10 @@ export function Onboarding({
             <p className="onboarding-note">
               The key never signs messages — it only authenticates signed, read-only queries.
             </p>
+            <AuthorizeHelp
+              relayUrl={activeRelay.current}
+              devicePubkey={deviceIdentity.status === "ready" ? deviceIdentity.identity.pubkey : undefined}
+            />
             {!adding && (
               <>
                 <form

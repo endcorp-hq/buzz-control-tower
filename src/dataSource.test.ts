@@ -143,6 +143,29 @@ describe("relay agent card ordering", () => {
   });
 });
 
+describe("viewer device key on the roster", () => {
+  it("never renders a card for the viewer's own device key", () => {
+    const channelId = "0b7c0958-3f7f-48c8-af3f-31e549b10e31";
+    const device = "d".repeat(64);
+    const agent = "9".repeat(64);
+    const rosters = new Map([[channelId, { authorPubkeys: [device, agent], authorNames: new Map<string, string>(), authorRoles: new Map<string, string>() }]]);
+    const agents = relayPagesSnapshot([{ relayUrl: "wss://relay.example", channelId, devicePubkey: device, messages: [] }], undefined, rosters)
+      .channels[0].workstreams[0].agents;
+    expect(agents.map((card) => card.pubkey)).toEqual([agent]);
+  });
+
+  it("keeps the device key out of the runtime snapshot's channel-roster lane too", () => {
+    const channelId = "0b7c0958-3f7f-48c8-af3f-31e549b10e31";
+    const device = "d".repeat(64);
+    const agent = "9".repeat(64);
+    const rosters = new Map([[channelId, { authorPubkeys: [device, agent], authorNames: new Map<string, string>(), authorRoles: new Map<string, string>() }]]);
+    const relayPages = new Map([[channelId, { relayUrl: "wss://relay.example", channelId, devicePubkey: device, messages: [] }]]);
+    const snapshot = runtimePagesSnapshot([], [], undefined, rosters, relayPages);
+    const rosterLane = snapshot.channels.find((channel) => channel.id === channelId)?.workstreams.find((lane) => lane.id.endsWith("-channel-roster"));
+    expect(rosterLane?.agents.map((card) => card.pubkey)).toEqual([agent]);
+  });
+});
+
 describe("relay card manifest from the rich lane", () => {
   it("derives context and artifacts from decrypted tool calls, and leaves evidence empty", () => {
     const channelId = "0b7c0958-3f7f-48c8-af3f-31e549b10e31";

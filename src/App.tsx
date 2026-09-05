@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { relaunchApp, startAppUpdates, type AppUpdateState } from "./appUpdate";
+import { AuthorizeHelp } from "./AuthorizeHelp";
 import { ChannelPicker } from "./ChannelPicker";
 import {
   dataSource,
@@ -132,6 +133,7 @@ export function RelayUnavailable({
   connection,
   onRefresh,
   deviceReady,
+  devicePubkey,
   onCopyDeviceKey,
   copyState,
 }: {
@@ -139,6 +141,7 @@ export function RelayUnavailable({
   connection: DataConnection;
   onRefresh: () => void;
   deviceReady: boolean;
+  devicePubkey?: string;
   onCopyDeviceKey: () => void;
   copyState: "idle" | "copied" | "failed";
 }) {
@@ -169,6 +172,13 @@ export function RelayUnavailable({
         <button className="relay-refresh-button" onClick={onRefresh}>
           <RefreshCw size={15} /> Refresh now
         </button>
+      )}
+      {needsAuthorization && snapshot.relayUrl && (
+        <AuthorizeHelp
+          relayUrl={snapshot.relayUrl}
+          devicePubkey={devicePubkey}
+          channels={snapshot.channels.map((channel) => channel.name)}
+        />
       )}
     </main>
   );
@@ -574,6 +584,7 @@ function App() {
             connection={connection}
             onRefresh={() => setRefreshVersion((version) => version + 1)}
             deviceReady={deviceIdentity.status === "ready"}
+            devicePubkey={deviceIdentity.status === "ready" ? deviceIdentity.identity.pubkey : undefined}
             onCopyDeviceKey={copyDeviceKey}
             copyState={copyState}
           />

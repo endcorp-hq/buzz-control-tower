@@ -49,9 +49,12 @@ request you (or your relay operator) grant once:
 | **Harness reader list** | The green **Working** lane: live tool calls, streaming replies, evidence | The agent's operator lists the device key in `BUZZ_ACP_OBSERVER_READERS` on the agent's host |
 
 The onboarding flow walks you through the first layer: it shows the device
-key with a copy button, you post it in a Buzz channel (e.g. *"authorize tower
-`3f9c21ab…` please"*), and the screen advances by itself once an operator
-admits it.
+key, a **paste-ready request** (relay, key, and the exact admin commands) with
+a copy button, and a short explainer of who can authorize — the relay's
+operator or an agent running on the relay host, no special Buzz role needed.
+You tag that person or agent with the request, and the screen advances by
+itself once the key is admitted. The same explainer and request appear
+whenever a workspace's relay stops recognizing the key.
 
 Two things that trip people up:
 

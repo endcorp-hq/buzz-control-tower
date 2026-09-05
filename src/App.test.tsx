@@ -207,13 +207,17 @@ describe("relay refresh scheduling", () => {
         connection={{ state: "setup-required", label: "Authorize device", detail: "Add this device identity to wss://relay.example to enable signed public activity.", retryable: false }}
         onRefresh={() => { refreshes += 1; }}
         deviceReady={true}
+        devicePubkey={"a".repeat(64)}
         onCopyDeviceKey={() => undefined}
         copyState="idle"
       />,
     ));
     expect(current.textContent).toContain("Authorize this device");
+    expect(current.textContent).toContain("What does authorize mean, and who can do it?");
+    expect(current.querySelector(".authorize-request pre")?.textContent).toContain(`buzz-admin add-member --pubkey ${"a".repeat(64)} --role member`);
     const buttons = [...current.querySelectorAll("button")];
     expect(buttons.find((button) => button.textContent?.includes("Copy device key"))).toBeDefined();
+    expect(buttons.find((button) => button.textContent?.includes("Copy request message"))).toBeDefined();
     const recheck = buttons.find((button) => button.textContent?.includes("Check again"));
     expect(recheck).toBeDefined();
     act(() => recheck?.click());
