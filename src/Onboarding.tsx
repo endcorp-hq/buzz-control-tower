@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { Hash, KeyRound, Radio, RefreshCw, Sparkles, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChannelDirectory, ChannelSummary } from "./dataSource";
+import { addWorkspace, type ChannelDirectory, type ChannelSummary } from "./dataSource";
 import { importDeviceIdentity, type DeviceIdentityState } from "./deviceIdentity";
 
 type OnboardingPhase = "relay" | "authorize" | "channels";
@@ -35,11 +35,22 @@ export function Onboarding({
   deviceIdentity,
   onIdentityChange,
   onComplete,
+  mode = "create",
+  onCancel,
 }: {
   deviceIdentity: DeviceIdentityState;
   onIdentityChange: (state: DeviceIdentityState) => void;
   onComplete: () => void;
+  /**
+   * `create` = first run (writes the document, offers the paste-my-key escape
+   * hatch). `add` = another relay on an existing install: same relay →
+   * authorize → channel journey rendered as an overlay, ends in
+   * `add_workspace`, and never touches the shared device identity.
+   */
+  mode?: "create" | "add";
+  onCancel?: () => void;
 }) {
+  const adding = mode === "add";
   const [phase, setPhase] = useState<OnboardingPhase>("relay");
   const [relayUrl, setRelayUrl] = useState("wss://");
   const [viewerName, setViewerName] = useState("");
@@ -87,14 +98,23 @@ export function Onboarding({
     setBusy(true);
     setError(undefined);
     try {
-      await invoke("create_workspace_profile", {
-        relayUrl: activeRelay.current,
-        workspace: relayHost(activeRelay.current),
-        viewerName: viewerName.trim() || "Operator",
-        channelId: channel.id,
-        channelName: channel.name,
-        channelDescription: channel.description,
-      });
+      if (adding) {
+        await addWorkspace({
+          relayUrl: activeRelay.current,
+          workspace: relayHost(activeRelay.current),
+          viewerName: viewerName.trim() || "Operator",
+          channel,
+        });
+      } else {
+        await invoke("create_workspace_profile", {
+          relayUrl: activeRelay.current,
+          workspace: relayHost(activeRelay.current),
+          viewerName: viewerName.trim() || "Operator",
+          channelId: channel.id,
+          channelName: channel.name,
+          channelDescription: channel.description,
+        });
+      }
       onComplete();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -153,14 +173,23 @@ export function Onboarding({
   };
 
   return (
-    <main className="onboarding-shell">
+    <main className={`onboarding-shell${adding ? " onboarding-overlay" : ""}`} role={adding ? "dialog" : undefined} aria-modal={adding || undefined} aria-label={adding ? "Add a workspace" : undefined}>
       <div className="onboarding-card">
         <div className="onboarding-brand">
           <div className="brand-mark"><Zap size={19} fill="currentColor" /></div>
           <div>
-            <h1>Buzz Control Tower</h1>
-            <p>Read-only observability for the agents in your Buzz channels.</p>
+            <h1>{adding ? "Add a workspace" : "Buzz Control Tower"}</h1>
+            <p>
+              {adding
+                ? "Observe another relay. One relay per workspace; the Tower shows one at a time."
+                : "Read-only observability for the agents in your Buzz channels."}
+            </p>
           </div>
+          {adding && onCancel && (
+            <button type="button" className="onboarding-close" aria-label="Cancel adding a workspace" onClick={onCancel}>
+              Cancel
+            </button>
+          )}
         </div>
 
         <ol className="onboarding-steps">
@@ -205,7 +234,7 @@ export function Onboarding({
                 placeholder="Shown in the header"
               />
             </label>
-            <div className="onboarding-identity">
+            {!adding && <div className="onboarding-identity">
               <span>Identity</span>
               <div className="onboarding-choice">
                 <button
@@ -236,7 +265,13 @@ export function Onboarding({
                   />
                 </label>
               )}
-            </div>
+            </div>}
+            {adding && (
+              <p className="onboarding-note">
+                This install's device key is reused. The new relay has to admit it before
+                channels appear — the next step shows the key to hand your operator.
+              </p>
+            )}
             <button
               type="submit"
               disabled={busy || !isTauri() || (identityMode === "own" && !ownerSecret.trim())}
@@ -278,29 +313,33 @@ export function Onboarding({
             <p className="onboarding-note">
               The key never signs messages — it only authenticates signed, read-only queries.
             </p>
-            <form
-              className="onboarding-manual"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void (async () => {
-                  if (await importOwnerKey()) await connect(activeRelay.current);
-                })();
-              }}
-            >
-              <input
-                type="password"
-                value={ownerSecret}
-                onChange={(event) => setOwnerSecret(event.target.value)}
-                placeholder="Or paste your own key (nsec1… / hex)"
-              />
-              <button type="submit" disabled={busy || !ownerSecret.trim()}>
-                Use my key
-              </button>
-            </form>
-            <p className="onboarding-note">
-              Already a member of this relay? Pasting your own Buzz key replaces this install's
-              device key and skips the admission wait.
-            </p>
+            {!adding && (
+              <>
+                <form
+                  className="onboarding-manual"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void (async () => {
+                      if (await importOwnerKey()) await connect(activeRelay.current);
+                    })();
+                  }}
+                >
+                  <input
+                    type="password"
+                    value={ownerSecret}
+                    onChange={(event) => setOwnerSecret(event.target.value)}
+                    placeholder="Or paste your own key (nsec1… / hex)"
+                  />
+                  <button type="submit" disabled={busy || !ownerSecret.trim()}>
+                    Use my key
+                  </button>
+                </form>
+                <p className="onboarding-note">
+                  Already a member of this relay? Pasting your own Buzz key replaces this install's
+                  device key and skips the admission wait.
+                </p>
+              </>
+            )}
           </div>
         )}
 
@@ -351,7 +390,10 @@ export function Onboarding({
         {error && <p className="onboarding-error">{error}</p>}
 
         <p className="onboarding-foot">
-          <Sparkles size={12} /> Add more channels later with the + button on the work graph.
+          <Sparkles size={12} />{" "}
+          {adding
+            ? "The new workspace becomes active as soon as its first channel is chosen; switch back any time from the header."
+            : "Add more channels later with the + button on the work graph."}{" "}
           Fleet collectors and pinned authors stay plain commands: <code>corepack pnpm tower --help</code>.
         </p>
       </div>

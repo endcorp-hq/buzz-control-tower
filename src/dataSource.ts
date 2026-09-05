@@ -3,6 +3,7 @@ import { fixtureSnapshot } from "./fixtures";
 import { deriveManifest } from "./derivedContext";
 import type {
   ActivityEvent,
+  WorkspaceSummary,
   AgentStatus,
   Artifact,
   ContextSource,
@@ -42,13 +43,7 @@ export type WorkspaceProfile = {
   localRuntime?: { channelId: string; agentPubkey: string; agentName: string };
 };
 
-export type WorkspaceSummary = {
-  id: string;
-  workspace: string;
-  relayUrl: string;
-  channelCount: number;
-  active: boolean;
-};
+export type { WorkspaceSummary } from "./domain";
 
 export type WorkspaceState = {
   path: string;
@@ -953,11 +948,36 @@ export function withConfiguredChannels(
   };
 }
 
+// Carry the workspace document summary on every snapshot so the header
+// switcher can render it whatever the connection state; the active workspace
+// is the one every relay read in this snapshot was made against.
+export function attachWorkspaces(
+  result: SnapshotLoadResult,
+  workspace: WorkspaceState | undefined,
+): SnapshotLoadResult {
+  if (!workspace?.workspaces?.length) return result;
+  return {
+    ...result,
+    snapshot: {
+      ...result.snapshot,
+      workspaces: workspace.workspaces,
+      activeWorkspaceId: workspace.activeWorkspaceId ?? undefined,
+    },
+  };
+}
+
 const DIRECTORY_TTL_MS = 60_000;
 const directoryCache = new Map<string, { at: number; directory: ChannelDirectory }>();
 
 class CompanionDataSource implements TowerDataSource {
+  private lastWorkspaceState?: WorkspaceState;
+
   async loadSnapshot(): Promise<SnapshotLoadResult> {
+    const result = await this.loadActiveWorkspace();
+    return attachWorkspaces(result, this.lastWorkspaceState);
+  }
+
+  private async loadActiveWorkspace(): Promise<SnapshotLoadResult> {
     if (!isTauri()) {
       return {
         snapshot: structuredClone(fixtureSnapshot),
@@ -983,6 +1003,7 @@ class CompanionDataSource implements TowerDataSource {
         },
       };
     }
+    this.lastWorkspaceState = workspace;
     if (!workspace.profile) {
       return {
         snapshot: structuredClone(fixtureSnapshot),
@@ -994,6 +1015,7 @@ class CompanionDataSource implements TowerDataSource {
       };
     }
     const profile = workspace.profile;
+    this.lastWorkspaceState = workspace;
     const presentation = presentationFromProfile(profile);
     const since = Math.floor(Date.now() / 1000) - 24 * 60 * 60;
     const hasCollectors = (profile.collectors?.length ?? 0) > 0;

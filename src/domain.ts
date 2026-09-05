@@ -94,6 +94,15 @@ export type Channel = {
   workstreams: Workstream[];
 };
 
+/** One entry of the workspace document: a relay and how many channels it observes. */
+export type WorkspaceSummary = {
+  id: string;
+  workspace: string;
+  relayUrl: string;
+  channelCount: number;
+  active: boolean;
+};
+
 export type TowerSnapshot = {
   generatedAt: string;
   viewerName: string;
@@ -106,6 +115,9 @@ export type TowerSnapshot = {
    * fixture and unavailable snapshots, where no profile channels are editable.
    */
   configuredChannelIds?: string[];
+  /** Every workspace in the document (one relay each) and which one this snapshot observes. */
+  workspaces?: WorkspaceSummary[];
+  activeWorkspaceId?: string;
 };
 
 export type DataConnection = {

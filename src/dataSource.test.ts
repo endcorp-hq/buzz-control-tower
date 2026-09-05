@@ -19,6 +19,7 @@ import {
   type ObserverStreamsPage,
   type RelayTelemetryPage,
   withConfiguredChannels,
+  attachWorkspaces,
   type RuntimeWorkstreamPage,
   type WorkspaceProfile,
 } from "./dataSource";
@@ -1050,5 +1051,32 @@ describe("stock-harness liveness signals", () => {
 
     expect(agent.status).toBe("working");
     expect(agent.statusLabel).toBe("Working");
+  });
+});
+
+describe("attachWorkspaces", () => {
+  const result = {
+    snapshot: unavailableSnapshot({ workspaceName: "w", viewerName: "v", relayUrl: "wss://relay.example" }),
+    connection: { state: "error" as const, label: "Relay unavailable", detail: "x" },
+  };
+
+  it("adds the document summary and active id to any snapshot", () => {
+    const attached = attachWorkspaces(result, {
+      path: "/tmp/workspace.json",
+      profile: null,
+      activeWorkspaceId: "relay-example",
+      workspaces: [
+        { id: "relay-example", workspace: "w", relayUrl: "wss://relay.example", channelCount: 2, active: true },
+        { id: "other", workspace: "o", relayUrl: "wss://other.example", channelCount: 1, active: false },
+      ],
+    });
+    expect(attached.snapshot.activeWorkspaceId).toBe("relay-example");
+    expect(attached.snapshot.workspaces?.map((workspace) => workspace.id)).toEqual(["relay-example", "other"]);
+    expect(attached.connection).toBe(result.connection);
+  });
+
+  it("leaves snapshots untouched without a document", () => {
+    expect(attachWorkspaces(result, undefined)).toBe(result);
+    expect(attachWorkspaces(result, { path: "/tmp/workspace.json", profile: null, workspaces: [] })).toBe(result);
   });
 });

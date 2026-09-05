@@ -102,6 +102,14 @@ corepack pnpm tower use buzz-example-org       # switch back
 corepack pnpm tower remove-workspace second-relay-example
 ```
 
+In the app the same journey lives under the workspace name in the header:
+the switcher lists every workspace with its relay host and channel count,
+switches with one click, and **Add a workspace** runs the relay → authorize →
+channel flow as an overlay (the paste-my-key escape hatch is first-run only;
+another relay always reuses this install's device key). Removing a workspace
+has the same guard rails as removing a channel: the last one cannot be
+removed, and removing the active one activates the first remaining.
+
 ## Add a runtime fleet collector (optional, deeper visibility)
 
 Signed relay activity needs no infrastructure. Live execution streams
