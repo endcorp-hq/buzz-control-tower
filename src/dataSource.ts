@@ -30,7 +30,10 @@ export type WorkspaceCollector = {
 };
 
 export type WorkspaceProfile = {
-  version: number;
+  /** Present on legacy single-profile files only; document entries omit it. */
+  version?: number;
+  /** Workspace id inside the document (derived from the relay host). */
+  id?: string;
   workspace: string;
   viewerName: string;
   relayUrl: string;
@@ -39,10 +42,50 @@ export type WorkspaceProfile = {
   localRuntime?: { channelId: string; agentPubkey: string; agentName: string };
 };
 
+export type WorkspaceSummary = {
+  id: string;
+  workspace: string;
+  relayUrl: string;
+  channelCount: number;
+  active: boolean;
+};
+
 export type WorkspaceState = {
   path: string;
+  /** The active workspace's profile; null/undefined means onboarding. */
   profile?: WorkspaceProfile | null;
+  activeWorkspaceId?: string | null;
+  /** Every workspace in the document, in document order (one relay each). */
+  workspaces?: WorkspaceSummary[];
 };
+
+export type NewWorkspace = {
+  relayUrl: string;
+  workspace: string;
+  viewerName: string;
+  channel: ChannelSummary;
+};
+
+/** Add a workspace (one relay + first channel) and make it active. */
+export function addWorkspace(input: NewWorkspace): Promise<WorkspaceState> {
+  return invoke<WorkspaceState>("add_workspace", {
+    relayUrl: input.relayUrl,
+    workspace: input.workspace,
+    viewerName: input.viewerName,
+    channelId: input.channel.id,
+    channelName: input.channel.name,
+    channelDescription: input.channel.description,
+  });
+}
+
+/** Make another workspace active; every relay read retargets on the next refresh. */
+export function switchWorkspace(workspaceId: string): Promise<WorkspaceState> {
+  return invoke<WorkspaceState>("switch_workspace", { workspaceId });
+}
+
+export function removeWorkspace(workspaceId: string): Promise<WorkspaceState> {
+  return invoke<WorkspaceState>("remove_workspace", { workspaceId });
+}
 
 export type ChannelSummary = { id: string; name: string; description: string };
 

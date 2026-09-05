@@ -71,13 +71,20 @@ second time in native Rust before React receives it.
 
 ## Workspace profile
 
-Since 0.3.0 nothing observable is compiled in. One runtime workspace profile
+Since 0.3.0 nothing observable is compiled in. One runtime workspace document
 (`~/.config/control-tower/workspace.json`, override with
-`$CONTROL_TOWER_WORKSPACE`) binds the visible workspace name, relay URL,
+`$CONTROL_TOWER_WORKSPACE`) lists workspaces — one relay each — and which one
+is active. Each workspace binds the visible workspace name, relay URL,
 authorized channels and authors, optional fixed runtime collectors, and the
-optional local runtime target. Native code loads and validates the profile on
-every refresh; the webview receives only the validated result and can never
-supply a relay, host, or command itself. The deterministic `tower` CLI
+optional local runtime target. The app observes exactly one workspace at a
+time: switching retargets every relay read to that workspace's relay (the
+observer stream supersedes its subscription; presence, roster, and telemetry
+polls follow on the next refresh). Version-1 files (a single bare profile,
+v0.9.x and earlier) load as a one-workspace document and are rewritten on the
+first mutation. Native code loads and validates the document on every
+refresh; the webview receives only the active workspace's validated profile
+plus a bounded summary of the others, and can never supply a relay, host, or
+command itself. The deterministic `tower` CLI
 (`scripts/tower.mjs`, `docs/ONBOARDING.md`) edits the profile atomically with
 the same validation rules, so onboarding a new relay or channel is code
 execution rather than agent work. On first launch the compiled-era nilor

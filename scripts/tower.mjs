@@ -17,6 +17,9 @@ import { pathToFileURL } from "node:url";
 import process from "node:process";
 
 export const PROFILE_VERSION = 1;
+export const DOCUMENT_VERSION = 2;
+const MAX_WORKSPACES = 8;
+const MAX_WORKSPACE_ID = 48;
 const MAX_CHANNELS = 8;
 const MAX_AUTHORS_PER_CHANNEL = 50;
 const MAX_COLLECTORS = 4;
@@ -55,9 +58,30 @@ const validRelayUrl = (value) => {
     && url.search === "" && url.hash === "";
 };
 
+const validWorkspaceId = (value) =>
+  typeof value === "string" && value.length > 0 && value.length <= MAX_WORKSPACE_ID
+  && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(value);
+
+// Stable, readable workspace id from the relay host, unique against `taken`.
+// Mirrors the Rust `workspace_id_for`.
+export function workspaceIdFor(relayUrl, taken = []) {
+  let host = "";
+  try {
+    host = new URL(relayUrl).hostname.toLowerCase();
+  } catch {
+    host = "";
+  }
+  const base = host.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, MAX_WORKSPACE_ID - 4) || "workspace";
+  if (!taken.includes(base)) return base;
+  for (let n = 2; ; n += 1) {
+    const candidate = `${base}-${n}`;
+    if (!taken.includes(candidate)) return candidate;
+  }
+}
+
 export function validateProfile(profile) {
   if (!profile || typeof profile !== "object") throw new Error("profile must be an object");
-  if (profile.version !== PROFILE_VERSION) {
+  if (profile.version !== undefined && profile.version !== PROFILE_VERSION) {
     throw new Error(`workspace profile version must be ${PROFILE_VERSION}`);
   }
   if (!validName(profile.workspace) || !validName(profile.viewerName)) {
@@ -123,22 +147,112 @@ export function validateProfile(profile) {
   return profile;
 }
 
-export function loadProfile(path) {
+export function validateDocument(document) {
+  if (!document || typeof document !== "object") throw new Error("document must be an object");
+  if (document.version !== DOCUMENT_VERSION) {
+    throw new Error(`workspace document version must be ${DOCUMENT_VERSION}`);
+  }
+  const workspaces = document.workspaces;
+  if (!Array.isArray(workspaces) || workspaces.length < 1 || workspaces.length > MAX_WORKSPACES) {
+    throw new Error(`document must list 1 to ${MAX_WORKSPACES} workspaces`);
+  }
+  const ids = new Set();
+  for (const workspace of workspaces) {
+    if (!validWorkspaceId(workspace.id)) {
+      throw new Error(`workspace id must be 1 to ${MAX_WORKSPACE_ID} lowercase letters, digits, or dashes: ${JSON.stringify(workspace.id)}`);
+    }
+    if (ids.has(workspace.id)) throw new Error(`duplicate workspace id: ${workspace.id}`);
+    ids.add(workspace.id);
+    try {
+      validateProfile(workspace);
+    } catch (error) {
+      throw new Error(`workspace ${workspace.id}: ${error.message}`);
+    }
+  }
+  if (!ids.has(document.activeWorkspace)) {
+    throw new Error(`active workspace ${document.activeWorkspace} is not in the document`);
+  }
+  return document;
+}
+
+// Version-1 files hold one bare profile; wrap it as the only, active workspace.
+function migrateProfile(profile) {
+  validateProfile(profile);
+  const { version: _version, ...entry } = profile;
+  const id = entry.id || workspaceIdFor(entry.relayUrl);
+  return { version: DOCUMENT_VERSION, activeWorkspace: id, workspaces: [{ id, ...entry }] };
+}
+
+export function loadDocument(path) {
   if (!existsSync(path)) {
     throw new Error(`no workspace profile at ${path}; run: tower init --relay <wss://relay> --workspace <name> --channel <uuid> --channel-name <name>`);
   }
-  return validateProfile(JSON.parse(readFileSync(path, "utf8")));
+  const parsed = JSON.parse(readFileSync(path, "utf8"));
+  return parsed?.version === DOCUMENT_VERSION ? validateDocument(parsed) : migrateProfile(parsed);
 }
 
-export function saveProfile(path, profile) {
-  validateProfile(profile);
+export function activeWorkspace(document) {
+  return document.workspaces.find((workspace) => workspace.id === document.activeWorkspace);
+}
+
+/** The active workspace's profile (kept for callers that think in one relay). */
+export function loadProfile(path) {
+  return activeWorkspace(loadDocument(path));
+}
+
+export function saveDocument(path, document) {
+  validateDocument(document);
   mkdirSync(dirname(path), { recursive: true });
-  const body = `${JSON.stringify(profile, null, 2)}\n`;
+  const body = `${JSON.stringify(document, null, 2)}\n`;
   const temp = `${path}.tmp`;
   if (existsSync(path)) copyFileSync(path, `${path}.bak`);
   writeFileSync(temp, body);
   renameSync(temp, path);
-  return profile;
+  return document;
+}
+
+/** Upsert one workspace profile (by id, defaulting to the active one) into the document. */
+export function saveProfile(path, profile) {
+  const document = existsSync(path)
+    ? loadDocument(path)
+    : { version: DOCUMENT_VERSION, activeWorkspace: profile.id, workspaces: [] };
+  const id = profile.id ?? document.activeWorkspace;
+  const entry = { ...profile, id };
+  delete entry.version;
+  const index = document.workspaces.findIndex((workspace) => workspace.id === id);
+  if (index === -1) document.workspaces.push(entry);
+  else document.workspaces[index] = entry;
+  saveDocument(path, document);
+  return entry;
+}
+
+function summary(document) {
+  return {
+    activeWorkspace: document.activeWorkspace,
+    workspaces: document.workspaces.map((workspace) => ({
+      id: workspace.id,
+      workspace: workspace.workspace,
+      relayUrl: workspace.relayUrl,
+      channelCount: workspace.channels.length,
+      active: workspace.id === document.activeWorkspace,
+    })),
+  };
+}
+
+function newWorkspace(id, options) {
+  return {
+    id,
+    workspace: options.workspace,
+    viewerName: options.viewer ?? options.workspace,
+    relayUrl: options.relay,
+    channels: [{
+      id: options.channel,
+      name: options["channel-name"],
+      description: options.description ?? "",
+      authors: (options.author ?? []).map(parseAuthor),
+    }],
+    collectors: [],
+  };
 }
 
 function parseAuthor(value) {
@@ -182,33 +296,73 @@ export const commands = {
   },
 
   show(path) {
-    return { path, profile: loadProfile(path) };
+    const document = loadDocument(path);
+    return { path, profile: activeWorkspace(document), ...summary(document) };
   },
 
   init(path, argv) {
     const { options } = parseArgs(argv, {
       relay: "value", workspace: "value", viewer: "value",
       channel: "value", "channel-name": "value", description: "value",
-      author: "list", force: "flag",
+      author: "list", force: "flag", id: "value",
     });
     required(options, ["relay", "workspace", "channel", "channel-name"]);
     if (existsSync(path) && !options.force) {
-      throw new Error(`a workspace profile already exists at ${path}; pass --force to replace it`);
+      throw new Error(`a workspace profile already exists at ${path}; pass --force to replace it, or use add-workspace`);
     }
-    const profile = {
-      version: PROFILE_VERSION,
-      workspace: options.workspace,
-      viewerName: options.viewer ?? options.workspace,
-      relayUrl: options.relay,
-      channels: [{
-        id: options.channel,
-        name: options["channel-name"],
-        description: options.description ?? "",
-        authors: (options.author ?? []).map(parseAuthor),
-      }],
-      collectors: [],
-    };
-    return { path, profile: saveProfile(path, profile) };
+    const id = options.id ?? workspaceIdFor(options.relay);
+    const document = { version: DOCUMENT_VERSION, activeWorkspace: id, workspaces: [newWorkspace(id, options)] };
+    saveDocument(path, document);
+    return { path, profile: activeWorkspace(document), ...summary(document) };
+  },
+
+  workspaces(path) {
+    return { path, ...summary(loadDocument(path)) };
+  },
+
+  "add-workspace"(path, argv) {
+    const { options } = parseArgs(argv, {
+      relay: "value", workspace: "value", viewer: "value",
+      channel: "value", "channel-name": "value", description: "value",
+      author: "list", id: "value",
+    });
+    required(options, ["relay", "workspace", "channel", "channel-name"]);
+    const document = loadDocument(path);
+    const taken = document.workspaces.map((workspace) => workspace.id);
+    const id = options.id ?? workspaceIdFor(options.relay, taken);
+    if (taken.includes(id)) throw new Error(`workspace ${id} already exists`);
+    document.workspaces.push(newWorkspace(id, options));
+    document.activeWorkspace = id;
+    saveDocument(path, document);
+    return { path, profile: activeWorkspace(document), ...summary(document) };
+  },
+
+  use(path, argv) {
+    const [id] = argv;
+    if (!id) throw new Error("usage: tower use <workspace-id>");
+    const document = loadDocument(path);
+    if (!document.workspaces.some((workspace) => workspace.id === id)) {
+      throw new Error(`workspace ${id} is not in the document`);
+    }
+    document.activeWorkspace = id;
+    saveDocument(path, document);
+    return { path, profile: activeWorkspace(document), ...summary(document) };
+  },
+
+  "remove-workspace"(path, argv) {
+    const [id] = argv;
+    if (!id) throw new Error("usage: tower remove-workspace <workspace-id>");
+    const document = loadDocument(path);
+    if (!document.workspaces.some((workspace) => workspace.id === id)) {
+      throw new Error(`workspace ${id} is not in the document`);
+    }
+    if (document.workspaces.length === 1) {
+      throw new Error("cannot remove the last workspace; the Tower must observe at least one relay");
+    }
+    document.workspaces = document.workspaces.filter((workspace) => workspace.id !== id);
+    if (document.activeWorkspace === id) document.activeWorkspace = document.workspaces[0].id;
+    saveDocument(path, document);
+    return { path, profile: activeWorkspace(document), ...summary(document) };
   },
 
   "add-channel"(path, argv) {
@@ -313,11 +467,18 @@ export const commands = {
   },
 };
 
-const USAGE = `Buzz Control Tower workspace commands (profile: ~/.config/control-tower/workspace.json or $CONTROL_TOWER_WORKSPACE)
+const USAGE = `Buzz Control Tower workspace commands (document: ~/.config/control-tower/workspace.json or $CONTROL_TOWER_WORKSPACE)
+
+The document lists workspaces — one relay each — and which one is active. Channel,
+author, collector, local-runtime and relay commands act on the active workspace.
 
   tower path
   tower show
-  tower init --relay <wss://relay> --workspace <name> --channel <uuid> --channel-name <name> [--viewer <name>] [--description <text>] [--author <hex[:name]>]... [--force]
+  tower init --relay <wss://relay> --workspace <name> --channel <uuid> --channel-name <name> [--viewer <name>] [--description <text>] [--author <hex[:name]>]... [--id <workspace-id>] [--force]
+  tower workspaces
+  tower add-workspace --relay <wss://relay> --workspace <name> --channel <uuid> --channel-name <name> [--viewer <name>] [--description <text>] [--id <workspace-id>]
+  tower use <workspace-id>
+  tower remove-workspace <workspace-id>
   tower add-channel <channel-uuid> --name <name> [--description <text>] [--author <hex[:name]>]...
   tower remove-channel <channel-uuid>
   tower add-author <channel-uuid> <pubkey-hex> [--name <display-name>]   (optional pin; agents are auto-discovered)
@@ -327,9 +488,10 @@ const USAGE = `Buzz Control Tower workspace commands (profile: ~/.config/control
   tower clear-local
   tower set-relay <wss://relay-host>
 
-Every mutation validates the full profile and writes it atomically (previous
-version kept at workspace.json.bak). The running app picks changes up on its
-next refresh — no rebuild.`;
+Every mutation validates the full document and writes it atomically (previous
+version kept at workspace.json.bak). Version-1 single-profile files are read
+transparently and rewritten as a document on the first mutation. The running
+app picks changes up on its next refresh — no rebuild.`;
 
 export function main(argv) {
   const [command, ...rest] = argv;
