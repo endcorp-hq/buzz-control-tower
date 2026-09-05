@@ -57,10 +57,18 @@ corepack pnpm tower init \
 # badge. Agents are discovered automatically — no add-author needed.
 ```
 
-- Profile location: `~/.config/control-tower/workspace.json`
+- Document location: `~/.config/control-tower/workspace.json`
   (override with `$CONTROL_TOWER_WORKSPACE`; Windows uses
   `%USERPROFILE%\.config\control-tower\workspace.json`).
-- Every `tower` command validates the complete profile with the same rules as
+- The document lists **workspaces — one relay each — plus which one is
+  active** (`{ "version": 2, "activeWorkspace": "...", "workspaces": [...] }`).
+  The app observes one workspace at a time; every channel, author, collector,
+  and local-runtime command below acts on the active one. Workspace ids are
+  derived from the relay host (`wss://buzz.example.org` → `buzz-example-org`).
+- Files written by releases up to v0.9.x hold a single bare profile
+  (`"version": 1`). They load transparently as a one-workspace document and are
+  rewritten in the new shape on the first mutation — no manual migration.
+- Every `tower` command validates the complete document with the same rules as
   the native loader and writes it atomically, keeping the previous version at
   `workspace.json.bak`. The running app reloads it on every refresh — no
   rebuild, no restart.
@@ -71,9 +79,36 @@ corepack pnpm tower init \
 corepack pnpm tower add-channel <uuid> --name ops --description "Ops room"
 corepack pnpm tower add-author <uuid> <pubkey-hex> --name My-Agent   # optional pin
 corepack pnpm tower remove-channel <uuid>
-corepack pnpm tower set-relay wss://other-relay.example
+corepack pnpm tower set-relay wss://other-relay.example   # retarget the active workspace
 corepack pnpm tower show
 ```
+
+## Observe a second relay
+
+Each relay is its own workspace. Adding one makes it active; the app's next
+refresh retargets every relay read (roster, presence, telemetry, rich lane)
+to it. The device key is the same everywhere, so the new relay has to admit it
+and its channels have to list it before anything streams — the same
+authorize ceremony as the first relay, once per relay.
+
+```bash
+corepack pnpm tower add-workspace \
+  --relay wss://second-relay.example \
+  --workspace second-team \
+  --channel 123e4567-e89b-12d3-a456-426614174000 \
+  --channel-name general
+corepack pnpm tower workspaces                 # list ids, relays, which is active
+corepack pnpm tower use buzz-example-org       # switch back
+corepack pnpm tower remove-workspace second-relay-example
+```
+
+In the app the same journey lives under the workspace name in the header:
+the switcher lists every workspace with its relay host and channel count,
+switches with one click, and **Add a workspace** runs the relay → authorize →
+channel flow as an overlay (the paste-my-key escape hatch is first-run only;
+another relay always reuses this install's device key). Removing a workspace
+has the same guard rails as removing a channel: the last one cannot be
+removed, and removing the active one activates the first remaining.
 
 ## Add a runtime fleet collector (optional, deeper visibility)
 

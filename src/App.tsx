@@ -29,7 +29,13 @@ import {
 import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { relaunchApp, startAppUpdates, type AppUpdateState } from "./appUpdate";
 import { ChannelPicker } from "./ChannelPicker";
-import { dataSource, MOS_AGENT_PUBKEY, removeWorkspaceChannel } from "./dataSource";
+import {
+  dataSource,
+  MOS_AGENT_PUBKEY,
+  removeWorkspace,
+  removeWorkspaceChannel,
+  switchWorkspace,
+} from "./dataSource";
 import {
   loadDeviceIdentity,
   type DeviceIdentityState,
@@ -45,6 +51,7 @@ import type {
   TowerSnapshot,
 } from "./domain";
 import { Onboarding } from "./Onboarding";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { allAgents, countWorkingAgents, findAgent, matchesAgentSearch } from "./selectors";
 
 type DetailTab = "live" | "context" | "evidence" | "artifacts";
@@ -185,6 +192,8 @@ function App() {
   const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ phase: "idle" });
   const [toast, setToast] = useState<"reconnecting" | "recovered">();
   const [channelEditError, setChannelEditError] = useState<string>();
+  const [addingWorkspace, setAddingWorkspace] = useState(false);
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
 
   useEffect(() => startAppUpdates(setAppUpdate), []);
 
@@ -296,6 +305,22 @@ function App() {
     }
   };
 
+  // Workspace = relay. Switching or removing goes through the bounded native
+  // commands; the refresh that follows retargets every relay read.
+  const runWorkspaceEdit = async (edit: () => Promise<unknown>) => {
+    setChannelEditError(undefined);
+    setWorkspaceBusy(true);
+    try {
+      await edit();
+      setExpandedChannels(new Set());
+      setRefreshVersion((version) => version + 1);
+    } catch (cause) {
+      setChannelEditError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
+
   const copyDeviceKey = async () => {
     if (deviceIdentity.status !== "ready") return;
     try {
@@ -314,7 +339,18 @@ function App() {
           <div className="brand-mark"><Zap size={19} fill="currentColor" /></div>
           <div>
             <div className="brand-name">Control Tower</div>
-            <div className="workspace-name">{workspaceSubtitle(snapshot.workspaceName, snapshot.relayUrl)}</div>
+            {snapshot.workspaces && snapshot.workspaces.length > 0 ? (
+              <WorkspaceSwitcher
+                workspaces={snapshot.workspaces}
+                activeWorkspaceId={snapshot.activeWorkspaceId}
+                busy={workspaceBusy}
+                onSwitch={(workspaceId) => void runWorkspaceEdit(() => switchWorkspace(workspaceId))}
+                onRemove={(workspaceId) => void runWorkspaceEdit(() => removeWorkspace(workspaceId))}
+                onAdd={() => setAddingWorkspace(true)}
+              />
+            ) : (
+              <div className="workspace-name">{workspaceSubtitle(snapshot.workspaceName, snapshot.relayUrl)}</div>
+            )}
           </div>
         </div>
 
@@ -344,6 +380,20 @@ function App() {
           <div className="avatar" aria-label={`${snapshot.viewerName} avatar`}>{viewerAvatarInitial(snapshot.viewerName)}</div>
         </div>
       </header>
+
+      {addingWorkspace && (
+        <Onboarding
+          mode="add"
+          deviceIdentity={deviceIdentity}
+          onIdentityChange={setDeviceIdentity}
+          onCancel={() => setAddingWorkspace(false)}
+          onComplete={() => {
+            setAddingWorkspace(false);
+            setExpandedChannels(new Set());
+            setRefreshVersion((version) => version + 1);
+          }}
+        />
+      )}
 
       <aside className="sidebar">
         <div className="sidebar-heading">

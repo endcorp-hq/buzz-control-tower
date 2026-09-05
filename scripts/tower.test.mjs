@@ -2,7 +2,9 @@ import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { commands, loadProfile, validateProfile } from "./tower.mjs";
+import { commands, loadDocument, loadProfile, validateProfile, workspaceIdFor } from "./tower.mjs";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
 const CHANNEL = "0b7c0958-3f7f-48c8-af3f-31e549b10e31";
 const SECOND_CHANNEL = "1da2b83b-c1e5-44b3-8a1c-546bf665933e";
@@ -35,9 +37,15 @@ describe("tower init", () => {
   it("creates a valid single-channel profile in one command", () => {
     const profile = initProfile();
     expect(profile.relayUrl).toBe("wss://buzz.example.org");
+    expect(profile.id).toBe("buzz-example-org");
     expect(profile.channels).toHaveLength(1);
     expect(profile.channels[0].authors[0]).toEqual({ pubkey: PUBKEY, name: "Sam-Agent" });
     expect(loadProfile(path)).toEqual(profile);
+    // Written as a version-2 document with the new workspace active.
+    const document = JSON.parse(readFileSync(path, "utf8"));
+    expect(document.version).toBe(2);
+    expect(document.activeWorkspace).toBe("buzz-example-org");
+    expect(document.workspaces[0].version).toBeUndefined();
   });
 
   it("refuses to overwrite without --force", () => {
@@ -118,5 +126,60 @@ describe("profile validation", () => {
       ...base,
       channels: [base.channels[0], base.channels[0]],
     })).toThrow(/duplicate channel/);
+  });
+});
+
+describe("workspaces", () => {
+  it("derives ids from relay hosts and keeps them unique", () => {
+    expect(workspaceIdFor("wss://buzz.nilor.cool")).toBe("buzz-nilor-cool");
+    expect(workspaceIdFor("ws://Relay.Example.ORG:8443/x")).toBe("relay-example-org");
+    expect(workspaceIdFor("nonsense")).toBe("workspace");
+    expect(workspaceIdFor("wss://buzz.nilor.cool", ["buzz-nilor-cool", "buzz-nilor-cool-2"])).toBe("buzz-nilor-cool-3");
+  });
+
+  it("reads a version-1 file as one active workspace and rewrites it on the first mutation", () => {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify({
+      version: 1,
+      workspace: "legacy",
+      viewerName: "Sam",
+      relayUrl: "wss://buzz.example.org",
+      channels: [{ id: CHANNEL, name: "general", description: "", authors: [] }],
+      collectors: [],
+    }, null, 2)}\n`);
+    const document = loadDocument(path);
+    expect(document.activeWorkspace).toBe("buzz-example-org");
+    expect(document.workspaces).toHaveLength(1);
+    expect(JSON.parse(readFileSync(path, "utf8")).version).toBe(1);
+
+    const { profile } = commands["add-channel"](path, [SECOND_CHANNEL, "--name", "ops"]);
+    expect(profile.channels).toHaveLength(2);
+    expect(JSON.parse(readFileSync(path, "utf8")).version).toBe(2);
+  });
+
+  it("adds, switches, and removes workspaces; channel commands follow the active one", () => {
+    initProfile();
+    const added = commands["add-workspace"](path, [
+      "--relay", "wss://relay.moskunventures.com",
+      "--workspace", "mv",
+      "--channel", SECOND_CHANNEL,
+      "--channel-name", "general",
+    ]);
+    expect(added.activeWorkspace).toBe("relay-moskunventures-com");
+    expect(added.workspaces.map((workspace) => [workspace.id, workspace.active])).toEqual([
+      ["buzz-example-org", false],
+      ["relay-moskunventures-com", true],
+    ]);
+
+    commands["add-channel"](path, [CHANNEL, "--name", "shared"]);
+    expect(loadProfile(path).channels).toHaveLength(2);
+    const used = commands.use(path, ["buzz-example-org"]);
+    expect(used.profile.channels).toHaveLength(1);
+    expect(() => commands.use(path, ["nope"])).toThrow(/not in the document/);
+
+    const removed = commands["remove-workspace"](path, ["buzz-example-org"]);
+    expect(removed.activeWorkspace).toBe("relay-moskunventures-com");
+    expect(() => commands["remove-workspace"](path, ["relay-moskunventures-com"])).toThrow(/last workspace/);
+    expect(commands.workspaces(path).workspaces).toHaveLength(1);
   });
 });

@@ -154,6 +154,38 @@ fn create_workspace_profile(
 }
 
 #[tauri::command]
+fn add_workspace(
+    relay_url: String,
+    workspace: String,
+    viewer_name: String,
+    channel_id: String,
+    channel_name: String,
+    channel_description: String,
+) -> Result<workspace_profile::WorkspaceState, String> {
+    workspace_profile::add_workspace(
+        &relay_url,
+        &workspace,
+        &viewer_name,
+        workspace_profile::ChannelConfig {
+            id: channel_id,
+            name: channel_name,
+            description: channel_description,
+            authors: Vec::new(),
+        },
+    )
+}
+
+#[tauri::command]
+fn switch_workspace(workspace_id: String) -> Result<workspace_profile::WorkspaceState, String> {
+    workspace_profile::switch_workspace(&workspace_id)
+}
+
+#[tauri::command]
+fn remove_workspace(workspace_id: String) -> Result<workspace_profile::WorkspaceState, String> {
+    workspace_profile::remove_workspace(&workspace_id)
+}
+
+#[tauri::command]
 fn add_workspace_channel(
     channel_id: String,
     channel_name: String,
@@ -196,6 +228,9 @@ pub fn run() {
             list_relay_channels,
             discover_channel_directory,
             create_workspace_profile,
+            add_workspace,
+            switch_workspace,
+            remove_workspace,
             add_workspace_channel,
             remove_workspace_channel
         ])

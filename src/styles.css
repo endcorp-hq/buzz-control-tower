@@ -46,6 +46,25 @@ button { color: inherit; }
 .brand-mark { width: 33px; height: 33px; border-radius: 9px; display: grid; place-items: center; color: #0d0c09; background: var(--amber); box-shadow: 0 0 28px rgba(246, 184, 74, .14); }
 .brand-name { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
 .workspace-name { margin-top: 2px; color: var(--muted); font: 10px var(--mono); }
+.workspace-switcher { position: relative; margin-top: 2px; }
+.workspace-switcher-button { display: inline-flex; align-items: center; gap: 5px; max-width: 260px; padding: 1px 4px 1px 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font: 10px var(--mono); cursor: pointer; }
+.workspace-switcher-button:hover, .workspace-switcher-button[aria-expanded="true"] { color: #d9dce2; }
+.workspace-switcher-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-switcher-menu { position: absolute; top: 24px; left: -4px; z-index: 8; width: 320px; display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-high); box-shadow: 0 14px 44px rgba(0, 0, 0, .55); }
+.workspace-row { display: flex; align-items: center; gap: 2px; border-radius: 7px; }
+.workspace-row:hover { background: rgba(255,255,255,.03); }
+.workspace-row > button:first-child { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: #d9dce2; cursor: pointer; text-align: left; }
+.workspace-row.active > button:first-child { border-color: rgba(246, 184, 74, .25); background: var(--amber-soft); }
+.workspace-row-check { width: 12px; display: grid; place-items: center; color: var(--amber); }
+.workspace-row-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.workspace-row-copy strong { font-size: 11px; }
+.workspace-row-copy span { overflow: hidden; color: #737984; font: 9.5px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.workspace-row-remove { display: grid; place-items: center; padding: 5px; margin-right: 4px; border: 0; border-radius: 5px; background: transparent; color: #5e646e; cursor: pointer; opacity: 0; }
+.workspace-row:hover .workspace-row-remove, .workspace-row-remove:focus-visible { opacity: 1; }
+.workspace-row-remove:hover { color: var(--red); background: rgba(255,123,123,.08); }
+.workspace-add { display: flex; align-items: center; gap: 6px; margin-top: 2px; padding: 7px 8px; border: 1px dashed rgba(246, 184, 74, .3); border-radius: 7px; background: transparent; color: var(--amber); font-size: 10.5px; cursor: pointer; }
+.workspace-add:hover:not(:disabled) { background: var(--amber-soft); }
+.workspace-switcher-note { margin: 2px 2px 0; color: #6b717c; font-size: 9.5px; line-height: 1.45; }
 
 .topbar-center { justify-self: center; display: flex; align-items: center; gap: 13px; color: #7e838f; font: 10px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
 .source-state { padding: 4px 7px; border-radius: 5px; }
@@ -358,7 +377,11 @@ button.update-ready:hover { background: rgba(246, 184, 74, .18); }
 /* First-run onboarding */
 .onboarding-shell { min-height: 100vh; display: grid; place-content: center; padding: 24px; background: radial-gradient(circle at 70% 12%, rgba(90, 78, 48, 0.12), transparent 34%), #090a0d; }
 .onboarding-card { width: min(560px, 92vw); display: flex; flex-direction: column; gap: 18px; padding: 26px 28px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 18px 60px rgba(0, 0, 0, .5); }
+.onboarding-overlay { position: fixed; inset: 0; z-index: 20; min-height: 0; background: rgba(6, 7, 9, .78); backdrop-filter: blur(3px); }
 .onboarding-brand { display: flex; align-items: center; gap: 13px; }
+.onboarding-brand > div:nth-child(2) { flex: 1; }
+.onboarding-close { align-self: flex-start; padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+.onboarding-close:hover { color: #d9dce2; border-color: #3a3f48; }
 .onboarding-brand h1 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
 .onboarding-brand p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
 .onboarding-steps { display: flex; gap: 8px; margin: 0; padding: 0; list-style: none; }

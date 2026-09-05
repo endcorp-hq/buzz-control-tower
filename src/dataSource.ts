@@ -3,6 +3,7 @@ import { fixtureSnapshot } from "./fixtures";
 import { deriveManifest } from "./derivedContext";
 import type {
   ActivityEvent,
+  WorkspaceSummary,
   AgentStatus,
   Artifact,
   ContextSource,
@@ -30,7 +31,10 @@ export type WorkspaceCollector = {
 };
 
 export type WorkspaceProfile = {
-  version: number;
+  /** Present on legacy single-profile files only; document entries omit it. */
+  version?: number;
+  /** Workspace id inside the document (derived from the relay host). */
+  id?: string;
   workspace: string;
   viewerName: string;
   relayUrl: string;
@@ -39,10 +43,44 @@ export type WorkspaceProfile = {
   localRuntime?: { channelId: string; agentPubkey: string; agentName: string };
 };
 
+export type { WorkspaceSummary } from "./domain";
+
 export type WorkspaceState = {
   path: string;
+  /** The active workspace's profile; null/undefined means onboarding. */
   profile?: WorkspaceProfile | null;
+  activeWorkspaceId?: string | null;
+  /** Every workspace in the document, in document order (one relay each). */
+  workspaces?: WorkspaceSummary[];
 };
+
+export type NewWorkspace = {
+  relayUrl: string;
+  workspace: string;
+  viewerName: string;
+  channel: ChannelSummary;
+};
+
+/** Add a workspace (one relay + first channel) and make it active. */
+export function addWorkspace(input: NewWorkspace): Promise<WorkspaceState> {
+  return invoke<WorkspaceState>("add_workspace", {
+    relayUrl: input.relayUrl,
+    workspace: input.workspace,
+    viewerName: input.viewerName,
+    channelId: input.channel.id,
+    channelName: input.channel.name,
+    channelDescription: input.channel.description,
+  });
+}
+
+/** Make another workspace active; every relay read retargets on the next refresh. */
+export function switchWorkspace(workspaceId: string): Promise<WorkspaceState> {
+  return invoke<WorkspaceState>("switch_workspace", { workspaceId });
+}
+
+export function removeWorkspace(workspaceId: string): Promise<WorkspaceState> {
+  return invoke<WorkspaceState>("remove_workspace", { workspaceId });
+}
 
 export type ChannelSummary = { id: string; name: string; description: string };
 
@@ -910,11 +948,36 @@ export function withConfiguredChannels(
   };
 }
 
+// Carry the workspace document summary on every snapshot so the header
+// switcher can render it whatever the connection state; the active workspace
+// is the one every relay read in this snapshot was made against.
+export function attachWorkspaces(
+  result: SnapshotLoadResult,
+  workspace: WorkspaceState | undefined,
+): SnapshotLoadResult {
+  if (!workspace?.workspaces?.length) return result;
+  return {
+    ...result,
+    snapshot: {
+      ...result.snapshot,
+      workspaces: workspace.workspaces,
+      activeWorkspaceId: workspace.activeWorkspaceId ?? undefined,
+    },
+  };
+}
+
 const DIRECTORY_TTL_MS = 60_000;
 const directoryCache = new Map<string, { at: number; directory: ChannelDirectory }>();
 
 class CompanionDataSource implements TowerDataSource {
+  private lastWorkspaceState?: WorkspaceState;
+
   async loadSnapshot(): Promise<SnapshotLoadResult> {
+    const result = await this.loadActiveWorkspace();
+    return attachWorkspaces(result, this.lastWorkspaceState);
+  }
+
+  private async loadActiveWorkspace(): Promise<SnapshotLoadResult> {
     if (!isTauri()) {
       return {
         snapshot: structuredClone(fixtureSnapshot),
@@ -940,6 +1003,7 @@ class CompanionDataSource implements TowerDataSource {
         },
       };
     }
+    this.lastWorkspaceState = workspace;
     if (!workspace.profile) {
       return {
         snapshot: structuredClone(fixtureSnapshot),
@@ -951,6 +1015,7 @@ class CompanionDataSource implements TowerDataSource {
       };
     }
     const profile = workspace.profile;
+    this.lastWorkspaceState = workspace;
     const presentation = presentationFromProfile(profile);
     const since = Math.floor(Date.now() / 1000) - 24 * 60 * 60;
     const hasCollectors = (profile.collectors?.length ?? 0) > 0;
