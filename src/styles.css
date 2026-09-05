@@ -292,13 +292,13 @@ button.update-ready:hover { background: rgba(246, 184, 74, .18); }
 .delivery-stage p { margin: 5px 0 0; color: #686e79; font: 8px var(--mono); line-height: 1.45; }
 
 .artifact-list { max-width: 920px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; }
-.artifact-list article { display: grid; grid-template-columns: 40px minmax(0,1fr) 120px 75px 18px; gap: 13px; align-items: center; padding: 13px 16px; background: rgba(18,20,25,.72); }
+.artifact-list article { display: grid; grid-template-columns: 40px minmax(0,1fr) minmax(120px, 220px) 75px 18px; gap: 13px; align-items: center; padding: 13px 16px; background: rgba(18,20,25,.72); }
 .artifact-list article + article { border-top: 1px solid var(--line); }
 .artifact-list article:hover { background: #171a20; }
 .artifact-list article > div:nth-child(2) { display: flex; flex-direction: column; gap: 3px; }
 .artifact-list article span { color: #626873; font: 7px var(--mono); text-transform: uppercase; }
 .artifact-list article strong { font-size: 10px; }
-.artifact-list code { color: #9aa0aa; font: 9px var(--mono); }
+.artifact-list code { min-width: 0; color: #9aa0aa; font: 9px var(--mono); overflow-wrap: anywhere; }
 .artifact-list time { color: #646b76; font-size: 8px; }
 .artifact-list > article > svg { color: #555c67; }
 
