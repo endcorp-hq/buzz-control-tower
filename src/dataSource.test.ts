@@ -53,6 +53,46 @@ describe("withConfiguredChannels", () => {
   });
 });
 
+describe("relay card manifest from the rich lane", () => {
+  it("derives context and artifacts from decrypted tool calls, and leaves evidence empty", () => {
+    const channelId = "0b7c0958-3f7f-48c8-af3f-31e549b10e31";
+    const pubkey = "9".repeat(64);
+    const page: RelayActivityPage = { relayUrl: "wss://relay.example", channelId, devicePubkey: "device", messages: [] };
+    const rosters = new Map([[channelId, { authorPubkeys: [pubkey], authorNames: new Map<string, string>(), authorRoles: new Map<string, string>() }]]);
+    const observerStreams = observerStreamsByAgent({
+      relayUrl: "wss://relay.example",
+      connected: true,
+      agents: [{
+        agentPubkey: pubkey,
+        channelId,
+        updatedAt: 1_700_000_000,
+        liveText: "",
+        liveThought: "",
+        entries: [
+          { id: "t2", at: "2026-09-05T18:01:00Z", kind: "tool", title: "Write", detail: "", status: "complete", parameters: [{ label: "filePath", value: "/w/README.md" }, { label: "content", value: "# hi" }], result: "ok" },
+          { id: "t1", at: "2026-09-05T18:00:00Z", kind: "tool", title: "Read", detail: "", status: "complete", parameters: [{ label: "filePath", value: "/w/src/index.ts" }], result: "export {}" },
+          { id: "l1", at: "2026-09-05T17:59:00Z", kind: "lifecycle", title: "Turn started", detail: "", parameters: [], result: null },
+        ],
+      }],
+    });
+
+    const agent = relayPagesSnapshot([page], undefined, rosters, undefined, observerStreams)
+      .channels[0].workstreams[0].agents[0];
+    expect(agent.context.map((source) => [source.kind, source.label])).toEqual([["file", "/w/src/index.ts"]]);
+    expect(agent.artifacts.map((artifact) => [artifact.kind, artifact.name])).toEqual([["document", "README.md"]]);
+    expect(agent.evidence).toEqual([]);
+  });
+
+  it("keeps the manifest empty without a rich lane", () => {
+    const channelId = "0b7c0958-3f7f-48c8-af3f-31e549b10e31";
+    const rosters = new Map([[channelId, { authorPubkeys: ["8".repeat(64)], authorNames: new Map<string, string>(), authorRoles: new Map<string, string>() }]]);
+    const agent = relayPagesSnapshot([{ relayUrl: "wss://relay.example", channelId, devicePubkey: "device", messages: [] }], undefined, rosters)
+      .channels[0].workstreams[0].agents[0];
+    expect(agent.context).toEqual([]);
+    expect(agent.artifacts).toEqual([]);
+  });
+});
+
 describe("companion relay snapshot", () => {
   it("uses an empty unavailable snapshot instead of fixture agents when the relay cannot be read", () => {
     const snapshot = unavailableSnapshot({

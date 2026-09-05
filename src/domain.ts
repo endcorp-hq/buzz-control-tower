@@ -29,7 +29,10 @@ export type ActivityEvent = {
 
 export type ContextSource = {
   id: string;
-  kind: "base" | "team" | "memory" | "thread" | "canvas" | "repository";
+  kind:
+    | "base" | "team" | "memory" | "thread" | "canvas" | "repository"
+    /** Derived from the rich lane: a file the agent read, a URL it fetched, a search it ran. */
+    | "file" | "web" | "search";
   label: string;
   detail: string;
   hash: string;

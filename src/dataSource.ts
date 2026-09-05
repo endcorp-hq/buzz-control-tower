@@ -1,5 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { fixtureSnapshot } from "./fixtures";
+import { deriveManifest } from "./derivedContext";
 import type {
   ActivityEvent,
   AgentStatus,
@@ -536,6 +537,7 @@ function relayAgentCard(
   // (every telemetry title also exists as a richer entry); telemetry still
   // owns card status, model, and timings — it is the agent's own summary.
   const richActivity = observer ? activityFromObserverStream(observer, !live) : [];
+  const manifest = observer ? deriveManifest(observer.entries, clockTime) : { context: [], artifacts: [] };
   const telemetryActivity = richActivity.length > 0
     ? richActivity
     : telemetry
@@ -577,9 +579,12 @@ function relayAgentCard(
     activity: [...telemetryActivity, ...[...messages].reverse().map(activityFromMessage)],
     liveText: observer?.liveText || undefined,
     liveThought: observer?.liveThought || undefined,
-    context: [],
+    // No collector on the agent host: the manifest is whatever the rich lane
+    // shows the turn reading and writing. Evidence stays empty — a delivery
+    // chain must not be inferred from tool activity.
+    context: manifest.context,
     evidence: [],
-    artifacts: [],
+    artifacts: manifest.artifacts,
   };
 }
 
