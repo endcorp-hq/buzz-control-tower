@@ -391,10 +391,14 @@ export function Onboarding({
 
         <p className="onboarding-foot">
           <Sparkles size={12} />{" "}
-          {adding
-            ? "The new workspace becomes active as soon as its first channel is chosen; switch back any time from the header."
-            : "Add more channels later with the + button on the work graph."}{" "}
-          Fleet collectors and pinned authors stay plain commands: <code>corepack pnpm tower --help</code>.
+          {adding ? (
+            "The new workspace becomes active as soon as its first channel is chosen; switch back any time from the header."
+          ) : (
+            <>
+              Add more channels later with the + button on the work graph. Fleet collectors and
+              pinned authors stay plain commands: <code>corepack pnpm tower --help</code>.
+            </>
+          )}
         </p>
       </div>
     </main>
