@@ -51,6 +51,95 @@ describe("withConfiguredChannels", () => {
     expect(merged.channels[0].id).toBe("0b7c0958-3f7f-48c8-af3f-31e549b10e31");
     expect(merged.channels[0].workstreams).not.toHaveLength(0);
   });
+
+  it("orders channels by the profile regardless of the order relay pages resolved", () => {
+    const page = (channelId: string): RelayActivityPage => ({
+      relayUrl: "wss://relay.example",
+      channelId,
+      devicePubkey: "device",
+      messages: [],
+    });
+    const profile = [
+      { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", name: "first" },
+      { id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", name: "second" },
+      { id: "cccccccc-cccc-cccc-cccc-cccccccccccc", name: "third" },
+    ];
+    const pollOne = withConfiguredChannels(relayPagesSnapshot([
+      page("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+      page("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+      page("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+    ]), profile);
+    const pollTwo = withConfiguredChannels(relayPagesSnapshot([
+      page("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+      page("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+    ]), profile);
+
+    const profileOrder = profile.map((channel) => channel.id);
+    expect(pollOne.channels.map((channel) => channel.id)).toEqual(profileOrder);
+    expect(pollTwo.channels.map((channel) => channel.id)).toEqual(profileOrder);
+    // A page that did resolve keeps its workstreams; the missing one is a quiet node.
+    expect(pollTwo.channels[0].workstreams).toHaveLength(0);
+    expect(pollTwo.channels[1].workstreams).not.toHaveLength(0);
+  });
+
+  it("keeps channels the profile does not list after the configured ones", () => {
+    const snapshot = relayPagesSnapshot([{
+      relayUrl: "wss://relay.example",
+      channelId: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      devicePubkey: "device",
+      messages: [],
+    }]);
+    const merged = withConfiguredChannels(snapshot, [
+      { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", name: "configured" },
+    ]);
+    expect(merged.channels.map((channel) => channel.id)).toEqual([
+      "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "dddddddd-dddd-dddd-dddd-dddddddddddd",
+    ]);
+  });
+});
+
+describe("relay agent card ordering", () => {
+  it("sorts cards by display name so message arrival order cannot reshuffle them", () => {
+    const channelId = "0b7c0958-3f7f-48c8-af3f-31e549b10e31";
+    const message = (pubkey: string, createdAt: number): RelayActivityPage["messages"][number] => ({
+      id: `${pubkey.slice(0, 4)}-${createdAt}`,
+      pubkey,
+      kind: 9,
+      createdAt,
+      content: "update",
+    });
+    const zed = "a".repeat(64);
+    const amy = "b".repeat(64);
+    const presentation = presentationFromProfile({
+      version: 1,
+      workspace: "test",
+      relayUrl: "wss://relay.example",
+      viewerName: "Sam",
+      channels: [{
+        id: channelId,
+        name: "buzz-control-tower",
+        authors: [
+          { pubkey: zed, name: "zed" },
+          { pubkey: amy, name: "Amy" },
+          { pubkey: "c".repeat(64), name: "mid" },
+        ],
+      }],
+    });
+    const rosters = new Map([[channelId, {
+      authorPubkeys: [zed, amy, "c".repeat(64)],
+      authorNames: new Map<string, string>(),
+      authorRoles: new Map<string, string>(),
+    }]]);
+    const snapshotFor = (messages: RelayActivityPage["messages"]) =>
+      relayPagesSnapshot([{ relayUrl: "wss://relay.example", channelId, devicePubkey: "device", messages }],
+        presentation, rosters).channels[0].workstreams[0].agents.map((agent) => agent.agentName);
+
+    const zedFirst = snapshotFor([message(zed, 200), message(amy, 100)]);
+    const amyFirst = snapshotFor([message(amy, 300), message(zed, 200)]);
+    expect(zedFirst).toEqual(["Amy", "mid", "zed"]);
+    expect(amyFirst).toEqual(zedFirst);
+  });
 });
 
 describe("companion relay snapshot", () => {
