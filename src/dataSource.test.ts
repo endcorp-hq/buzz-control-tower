@@ -1056,7 +1056,14 @@ describe("stock-harness liveness signals", () => {
 
 describe("attachWorkspaces", () => {
   const result = {
-    snapshot: unavailableSnapshot({ workspaceName: "w", viewerName: "v", relayUrl: "wss://relay.example" }),
+    snapshot: unavailableSnapshot({
+      workspaceName: "w",
+      viewerName: "v",
+      relayUrl: "wss://relay.example",
+      channels: new Map(),
+      authorNames: new Map(),
+      authorRoles: new Map(),
+    }),
     connection: { state: "error" as const, label: "Relay unavailable", detail: "x" },
   };
 
