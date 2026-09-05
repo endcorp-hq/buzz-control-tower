@@ -389,6 +389,15 @@ function activityFromMessage(message: RelayMessage): ActivityEvent {
 
 export type ChannelRosters = Map<string, ChannelRoster>;
 
+// Relay-derived cards arrive in whatever order the relay returned messages
+// (and roster discovery resolved), which changes from poll to poll. Sort them
+// by display name so a card keeps its place in the sidebar between refreshes.
+function sortAgentsByName<T extends { agentName: string; pubkey: string }>(agents: T[]): T[] {
+  return [...agents].sort((left, right) =>
+    left.agentName.localeCompare(right.agentName, undefined, { sensitivity: "base" })
+      || left.pubkey.localeCompare(right.pubkey));
+}
+
 function groupMessagesByAuthor(page: RelayActivityPage | undefined): Map<string, RelayMessage[]> {
   const byAuthor = new Map<string, RelayMessage[]>();
   for (const message of page?.messages ?? []) {
@@ -607,10 +616,10 @@ export function relayPagesSnapshot(
     for (const pubkey of rosters?.get(page.channelId)?.authorPubkeys ?? []) {
       if (!byAuthor.has(pubkey)) pubkeys.push(pubkey);
     }
-    const agents = pubkeys.map((pubkey) =>
+    const agents = sortAgentsByName(pubkeys.map((pubkey) =>
       relayAgentCard(page.channelId, pubkey, byAuthor.get(pubkey) ?? [], presentation,
         channelTelemetry(telemetryPages, page.channelId, pubkey),
-        channelObserverStream(observerStreams, page.channelId, pubkey), signals));
+        channelObserverStream(observerStreams, page.channelId, pubkey), signals)));
     channels.push({
       id: page.channelId,
       name: meta.name,
@@ -788,10 +797,10 @@ export function runtimePagesSnapshot(
       id: `${channelId}-channel-roster`,
       title: "Channel roster",
       phase: "Relay-discovered",
-      agents: quiet.map((pubkey) =>
+      agents: sortAgentsByName(quiet.map((pubkey) =>
         relayAgentCard(channelId, pubkey, byAuthor.get(pubkey) ?? [], presentation,
           channelTelemetry(telemetryPages, channelId, pubkey),
-          channelObserverStream(observerStreams, channelId, pubkey), signals)),
+          channelObserverStream(observerStreams, channelId, pubkey), signals))),
     });
   }
 
@@ -869,22 +878,29 @@ export function mergeChannelRoster(
 // snapshot entirely, which reads as a broken add. Give every profile channel a
 // node — an empty one renders as a quiet channel — and record the configured
 // ids so the sidebar knows which channels are editable.
+//
+// Channels are emitted in profile order. The snapshot builders collect relay
+// pages as their parallel fetches resolve, so their own order changes from
+// poll to poll; pinning to the profile keeps the sidebar from reshuffling
+// every refresh. Channels the profile does not list (fleet-discovered ones)
+// follow in the order they were found.
 export function withConfiguredChannels(
   snapshot: TowerSnapshot,
   profileChannels: WorkspaceChannel[],
 ): TowerSnapshot {
-  const present = new Set(snapshot.channels.map((channel) => channel.id));
-  const missing = profileChannels
-    .filter((channel) => !present.has(channel.id))
-    .map((channel) => ({
+  const byId = new Map(snapshot.channels.map((channel) => [channel.id, channel]));
+  const configured = profileChannels.map((channel) =>
+    byId.get(channel.id) ?? {
       id: channel.id,
       name: channel.name,
       description: channel.description ?? "",
       workstreams: [],
-    }));
+    });
+  const configuredIds = new Set(profileChannels.map((channel) => channel.id));
+  const unlisted = snapshot.channels.filter((channel) => !configuredIds.has(channel.id));
   return {
     ...snapshot,
-    channels: [...snapshot.channels, ...missing],
+    channels: [...configured, ...unlisted],
     configuredChannelIds: profileChannels.map((channel) => channel.id),
   };
 }
