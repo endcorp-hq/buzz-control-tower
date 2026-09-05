@@ -655,9 +655,12 @@ export function relayPagesSnapshot(
   for (const page of pages) {
     const meta = channelPresentation(presentation, page.channelId);
     const byAuthor = groupMessagesByAuthor(page);
-    const pubkeys = [...byAuthor.keys()];
+    // The viewer's own device key is a channel member too (that is how it
+    // reads the channel) but it is never an agent to observe: keep it off
+    // the roster instead of showing a nameless card for it.
+    const pubkeys = [...byAuthor.keys()].filter((pubkey) => pubkey !== page.devicePubkey);
     for (const pubkey of rosters?.get(page.channelId)?.authorPubkeys ?? []) {
-      if (!byAuthor.has(pubkey)) pubkeys.push(pubkey);
+      if (!byAuthor.has(pubkey) && pubkey !== page.devicePubkey) pubkeys.push(pubkey);
     }
     const agents = sortAgentsByName(pubkeys.map((pubkey) =>
       relayAgentCard(page.channelId, pubkey, byAuthor.get(pubkey) ?? [], presentation,
@@ -833,7 +836,8 @@ export function runtimePagesSnapshot(
     const covered = new Set(
       channel.workstreams.flatMap((workstream) => workstream.agents.map((agent) => agent.pubkey)),
     );
-    const quiet = roster.authorPubkeys.filter((pubkey) => !covered.has(pubkey));
+    const devicePubkey = relayPages?.get(channelId)?.devicePubkey;
+    const quiet = roster.authorPubkeys.filter((pubkey) => !covered.has(pubkey) && pubkey !== devicePubkey);
     if (quiet.length === 0) continue;
     const byAuthor = groupMessagesByAuthor(relayPages?.get(channelId));
     channel.workstreams.push({

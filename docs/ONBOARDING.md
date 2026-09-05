@@ -10,10 +10,14 @@ command — no agent judgment anywhere in the flow.
 1. **Select your relay.** Enter the `wss://` relay URL of the Buzz server you
    are already in, plus your display name.
 2. **Authorize this device.** The app shows its read-only device key (created
-   in the OS keyring; it can never sign messages). Send it to your relay
-   operator, who admits it with existing Buzz administration. The screen polls
-   the relay every five seconds and advances by itself the moment the key is
-   admitted.
+   in the OS keyring; it can never sign messages) together with a paste-ready
+   request and a "what does authorize mean" explainer. Copy the request and
+   tag whoever runs that relay — its operator, or an agent on the relay host
+   (an ops agent, typically; no special Buzz role is needed, only shell on
+   the host). The request names the relay, the key, and the two admin
+   commands (`buzz-admin add-member`, then `buzz channels add-member` per
+   channel). The screen polls the relay every five seconds and advances by
+   itself the moment the key is admitted.
 3. **Select your channel.** The app lists the channels the relay makes visible
    to the device (signed kind:39000 metadata). Pick one — or paste a channel
    UUID directly. The choice is written to the workspace profile through a

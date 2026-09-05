@@ -1,6 +1,6 @@
 [package]
 name = "buzz-control-tower"
-version = "0.10.0"
+version = "0.10.1"
 description = "Cross-platform Buzz agent observability companion"
 authors = ["Buzz Control Tower contributors"]
 edition = "2021"
